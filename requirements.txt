@@ -1,0 +1,10 @@
+streamlit
+geopandas>=0.14.0
+rioxarray>=0.15.0
+earthengine-api>=0.1.370
+geemap>=0.28.0
+pyogrio>=0.7.0
+fiona
+rasterio
+shapely
+pyproj
