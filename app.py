@@ -48,7 +48,7 @@ st.markdown("""
 
 @st.cache_data(show_spinner=False)
 def load_drive_data(file_id):
-    """Downloads District Database from Google Drive."""
+    """Downloads Dataset from Google Drive."""
     url = f'https://drive.google.com/uc?id={file_id}'
     temp_dir = tempfile.mkdtemp()
     zip_path = os.path.join(temp_dir, "drive_data.zip")
@@ -56,6 +56,7 @@ def load_drive_data(file_id):
         gdown.download(url, zip_path, quiet=True, fuzzy=True)
         return extract_and_read(zip_path, temp_dir)
     except Exception as e:
+        st.error(f"Failed to load Drive data: {e}")
         return None
 
 @st.cache_data(show_spinner=False)
@@ -90,11 +91,13 @@ def extract_and_read(zip_path, temp_dir):
         return None
 
 def clean_text_data(gdf):
-    """Fixes encoding issues."""
-    target_cols = ['District', 'STATE', 'district', 'state', 'Name', 'name']
+    """Fixes encoding issues and standardizes columns."""
+    # Added Sub_dist and STATE_UT to targets based on your screenshot
+    target_cols = ['District', 'STATE', 'district', 'state', 'Name', 'name', 'Sub_dist', 'STATE_UT']
     for col in target_cols:
         if col in gdf.columns:
             if pd.api.types.is_string_dtype(gdf[col]) or pd.api.types.is_object_dtype(gdf[col]):
+                # Generic cleanup for encoding artifacts like '>'
                 if gdf[col].astype(str).str.contains('>').any():
                     gdf[col] = gdf[col].astype(str).str.replace('>', 'A')
     return gdf
@@ -181,20 +184,40 @@ def view_admin_downloader():
         st.subheader("1. Select Source")
         source_type = st.radio(
             "Dataset Level",
-            ["🏛️ Districts (Detailed)", "🗺️ States (Boundaries Only)"],
-            captions=["Includes District & State attributes", "State outlines only"]
+            [
+                "🏛️ Districts (Detailed)", 
+                "🏘️ Subdistricts (Tehsil/Taluk)", 
+                "🗺️ States (Boundaries Only)"
+            ],
+            captions=[
+                "District attributes & boundaries", 
+                "Detailed Sub-District boundaries", 
+                "State outlines only"
+            ]
         )
         
         gdf = None
+        # Logic to load data based on selection
         if "Districts" in source_type:
             with st.spinner("Fetching District Database..."):
                 gdf = load_drive_data('1tMyiUheQBcwwPwZQla67PwC5-AqenTmv')
-        else:
+        
+        elif "Subdistricts" in source_type:
+            with st.spinner("Fetching Subdistrict Database..."):
+                # New Drive ID for subdistricts
+                gdf = load_drive_data('18lMyt2j3Xjz_Qk_2Kzppr8EVlVDx_yOv')
+                
+        else: # States
             with st.spinner("Fetching State Database..."):
                 gdf = load_github_data("https://github.com/nitesh4004/GeoFormatX/blob/main/STATE_BOUNDARY.zip")
         
         if gdf is None:
             st.stop()
+            
+        # --- Normalization Block ---
+        # Rename STATE_UT to STATE for consistency if present (based on screenshot)
+        if 'STATE_UT' in gdf.columns:
+            gdf.rename(columns={'STATE_UT': 'STATE'}, inplace=True)
             
         gdf = clean_text_data(gdf)
         
@@ -209,11 +232,31 @@ def view_admin_downloader():
             states = sorted(gdf['STATE'].astype(str).unique())
             sel_state = st.selectbox("Select State", states)
             
+            # --- Logic for Districts ---
             if "Districts" in source_type and 'District' in gdf.columns:
                 districts = sorted(gdf[gdf['STATE'] == sel_state]['District'].astype(str).unique())
                 sel_district = st.selectbox("Select District", districts)
                 selected_feature = gdf[(gdf['STATE'] == sel_state) & (gdf['District'] == sel_district)]
                 filename = f"{sel_district}_{sel_state}"
+            
+            # --- Logic for Subdistricts (New) ---
+            elif "Subdistricts" in source_type and 'District' in gdf.columns and 'Sub_dist' in gdf.columns:
+                # First filter by State to get Districts
+                state_gdf = gdf[gdf['STATE'] == sel_state]
+                districts = sorted(state_gdf['District'].astype(str).unique())
+                
+                sel_district = st.selectbox("Select District", districts)
+                
+                # Then filter by District to get Subdistricts
+                dist_gdf = state_gdf[state_gdf['District'] == sel_district]
+                subdistricts = sorted(dist_gdf['Sub_dist'].astype(str).unique())
+                
+                sel_subdistrict = st.selectbox("Select Subdistrict", subdistricts)
+                
+                selected_feature = dist_gdf[dist_gdf['Sub_dist'] == sel_subdistrict]
+                filename = f"{sel_subdistrict}_{sel_district}_Subdistrict"
+                
+            # --- Logic for States ---
             else:
                 selected_feature = gdf[gdf['STATE'] == sel_state]
                 filename = f"{sel_state}_Boundary"
@@ -248,11 +291,12 @@ def view_admin_downloader():
                 st.map(map_data)
                 
                 with st.expander("View Attribute Data"):
+                    # Drop geometry to just show the table
                     st.dataframe(selected_feature.drop(columns='geometry').head())
             except Exception as e:
                 st.warning("Map preview unavailable.")
         else:
-            st.info("Select a State/District to generate a preview.")
+            st.info("Select a Region to generate a preview.")
 
 def view_data_converter():
     st.title("🔄 Universal Data Converter")
