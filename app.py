@@ -5,7 +5,7 @@ import fiona
 import os
 import shutil
 import tempfile
-import requests
+import gdown  # New dependency for robust Drive downloads
 from zipfile import ZipFile
 from io import BytesIO
 import glob
@@ -37,33 +37,42 @@ st.markdown("""
 
 @st.cache_data(show_spinner=False)
 def load_default_data():
-    """Downloads and caches the District Boundary from Google Drive."""
+    """
+    Downloads and caches the District Boundary from Google Drive using gdown.
+    gdown handles large file warnings and tokens automatically.
+    """
     # Your specific Google Drive File ID
     file_id = '1tMyiUheQBcwwPwZQla67PwC5-AqenTmv'
-    url = f'https://drive.google.com/uc?id={file_id}&export=download'
+    # Construct the URL for gdown
+    url = f'https://drive.google.com/uc?id={file_id}'
     
     temp_dir = tempfile.mkdtemp()
     zip_path = os.path.join(temp_dir, "default_districts.zip")
     
     try:
-        response = requests.get(url)
-        response.raise_for_status()
+        # Using gdown for robust download
+        # quiet=True suppresses standard output logs
+        gdown.download(url, zip_path, quiet=True, fuzzy=True)
         
-        with open(zip_path, "wb") as f:
-            f.write(response.content)
-            
+        # Verify file exists and is not empty
+        if not os.path.exists(zip_path) or os.path.getsize(zip_path) == 0:
+            st.error("Download failed or file is empty.")
+            return None
+
         with ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(temp_dir)
             
         spatial_files = []
+        # Search for shapefiles recursively
         for ext in ['*.shp']:
             spatial_files.extend(glob.glob(os.path.join(temp_dir, '**', ext), recursive=True))
             
         if spatial_files:
             return gpd.read_file(spatial_files[0])
         else:
-            st.error("Default database error: No Shapefile found in the Drive link.")
+            st.error("Default database error: No Shapefile found in the downloaded archive.")
             return None
+            
     except Exception as e:
         st.error(f"Failed to load default database: {e}")
         return None
@@ -83,9 +92,11 @@ def extract_zip(zip_path, extract_to):
         zip_ref.extractall(extract_to)
     
     spatial_files = []
+    # Priority search for spatial formats
     for ext in ['*.shp', '*.gpkg', '*.geojson', '*.kml', '*.json', '*.tab']:
         spatial_files.extend(glob.glob(os.path.join(extract_to, '**', ext), recursive=True))
     
+    # Prioritize Shapefile if multiple exist
     shp_files = [f for f in spatial_files if f.endswith('.shp')]
     if shp_files:
         return shp_files[0]
@@ -102,6 +113,7 @@ def make_zip(source_dir, output_filename):
     return zip_buffer
 
 def convert_crs(gdf, target_crs):
+    """Reprojects the GeoDataFrame to the target coordinate reference system."""
     if gdf.crs is None:
         st.warning("⚠️ Input data has no defined CRS. Assuming WGS84 (EPSG:4326).")
         gdf.set_crs(epsg=4326, inplace=True)
@@ -211,7 +223,7 @@ def main():
     
     # A. Data Loading Strategy
     if data_source == "🇮🇳 India District Database (Default)":
-        with st.spinner("Connecting to District Database (one-time download)..."):
+        with st.spinner("Connecting to District Database (via gdown)..."):
             gdf = load_default_data()
             if gdf is not None:
                 st.success("✅ Connected to India District Database")
@@ -230,7 +242,7 @@ def main():
                     gdf = gpd.read_file(main_file)
                     st.info(f"📂 Read: {os.path.basename(main_file)}")
             
-            # Case 2: Tabular (CSV/Excel) - RESTORED FEATURE
+            # Case 2: Tabular (CSV/Excel)
             elif file_path.endswith(('.csv', '.xlsx')):
                 df = pd.read_csv(file_path) if file_path.endswith('.csv') else pd.read_excel(file_path)
                 st.write("### 🛠️ Tabular Configuration")
