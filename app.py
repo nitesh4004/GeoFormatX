@@ -1,350 +1,312 @@
 import streamlit as st
-import os
-import tempfile
-import shutil
-import zipfile
-import glob
-from datetime import datetime
-import json
-
 import geopandas as gpd
 import pandas as pd
-import rioxarray as rxr
-import xarray as xr
-from shapely.geometry import Point
-import ee
-import geemap.foliumap as geemap
-from pyproj import CRS
+import fiona
+import os
+import shutil
+import tempfile
+from zipfile import ZipFile
+from io import BytesIO
+import glob
 
-# --- Configuration & State Management ---
+# --- Configuration & Drivers ---
 st.set_page_config(
-    page_title="GeoSpatial ETL Hub",
+    page_title="GeoConvert Pro | Vector Data ETL",
+    page_icon="🌍",
     layout="wide",
-    page_icon="🌍"
+    initial_sidebar_state="expanded"
 )
 
-if 'history' not in st.session_state:
-    st.session_state['history'] = []
+# Enable KML/KMZ drivers for Fiona (often disabled by default)
+fiona.drvsupport.supported_drivers['KML'] = 'rw'
+fiona.drvsupport.supported_drivers['LIBKML'] = 'rw'
 
-# --- Backend Processing Functions (The "Logic" Layer) ---
+# --- CSS Styling ---
+st.markdown("""
+    <style>
+    .main {
+        background-color: #f8f9fa;
+    }
+    .stButton>button {
+        width: 100%;
+        border-radius: 5px;
+        height: 3em;
+        background-color: #4CAF50;
+        color: white;
+    }
+    .stDownloadButton>button {
+        width: 100%;
+        border-radius: 5px;
+        height: 3em;
+        background-color: #008CBA;
+        color: white;
+    }
+    .stSuccess {
+        padding: 10px;
+        border-radius: 5px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-def save_uploaded_file(uploaded_file):
-    """
-    Persists uploaded bytes to a temporary directory.
-    Handles unzipping for Shapefiles (which require .shp, .shx, .dbf).
-    """
-    temp_dir = tempfile.mkdtemp()
-    file_path = os.path.join(temp_dir, uploaded_file.name)
+# --- Helper Functions ---
+
+def save_uploaded_file(uploaded_file, temp_dir):
+    """Saves uploaded stream to a temporary file path."""
+    try:
+        file_path = os.path.join(temp_dir, uploaded_file.name)
+        with open(file_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        return file_path
+    except Exception as e:
+        st.error(f"Error saving file: {e}")
+        return None
+
+def extract_zip(zip_path, extract_to):
+    """Extracts zip and looks for spatial files."""
+    with ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall(extract_to)
     
-    with open(file_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
+    # Heuristic: Find the largest .shp file or first .gpkg/.geojson
+    spatial_files = []
+    for ext in ['*.shp', '*.gpkg', '*.geojson', '*.kml', '*.json', '*.tab']:
+        spatial_files.extend(glob.glob(os.path.join(extract_to, '**', ext), recursive=True))
     
-    # Handle Shapefile Zips
-    if uploaded_file.name.lower().endswith(".zip"):
-        with zipfile.ZipFile(file_path, 'r') as zip_ref:
-            zip_ref.extractall(temp_dir)
-        
-        # Search for the .shp file recursively
-        shp_files = [f for f in glob.glob(os.path.join(temp_dir, "**/*.shp"), recursive=True)]
-        if shp_files:
-            return shp_files[0] # Return the first shapefile found
-        else:
-            raise FileNotFoundError("No .shp file found in the uploaded zip.")
-            
-    return file_path
+    # Return the most likely main file (shapefile preferred in zips)
+    shp_files = [f for f in spatial_files if f.endswith('.shp')]
+    if shp_files:
+        return shp_files[0]
+    return spatial_files[0] if spatial_files else None
 
-def process_vector(file_path, target_crs=None, output_format=None, lat_col=None, lon_col=None):
-    """
-    Loads, reprojects, and converts vector data using GeoPandas + Pyogrio.
-    """
-    # 1. Load Data
-    if file_path.lower().endswith('.csv'):
-        df = pd.read_csv(file_path)
-        if lat_col and lon_col:
-            gdf = gpd.GeoDataFrame(
-                df, 
-                geometry=gpd.points_from_xy(df[lon_col], df[lat_col]),
-                crs="EPSG:4326"
-            )
-        else:
-            return None, "CSV requires Lat/Lon selection."
-    else:
-        # Engine='pyogrio' is significantly faster for large datasets
-        gdf = gpd.read_file(file_path, engine="pyogrio")
+def make_zip(source_dir, output_filename):
+    """Zips a directory for download (used for Shapefiles)."""
+    zip_buffer = BytesIO()
+    with ZipFile(zip_buffer, 'w') as zip_file:
+        for root, dirs, files in os.walk(source_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                zip_file.write(file_path, os.path.relpath(file_path, source_dir))
+    zip_buffer.seek(0)
+    return zip_buffer
 
-    # 2. Reproject
-    if target_crs and gdf.crs:
-        # Normalize CRS input (handle string vs EPSG int)
-        try:
-            target_crs_obj = CRS.from_user_input(target_crs)
-            if gdf.crs != target_crs_obj:
-                gdf = gdf.to_crs(target_crs_obj)
-        except Exception as e:
-            return None, f"CRS Error: {str(e)}"
+def convert_crs(gdf, target_crs):
+    """Reprojects GeoDataFrame."""
+    if gdf.crs is None:
+        st.warning("⚠️ Input data has no defined CRS. Assuming WGS84 (EPSG:4326) before conversion.")
+        gdf.set_crs(epsg=4326, inplace=True)
+    return gdf.to_crs(target_crs)
 
-    # 3. Export (if format requested)
-    output_path = None
-    mime_type = "application/octet-stream"
-    
-    if output_format:
-        tmp_out_dir = tempfile.mkdtemp()
-        
-        # Driver mapping
-        drivers = {
-            'geojson': ('GeoJSON', '.geojson', 'application/json'),
-            'gpkg': ('GPKG', '.gpkg', 'application/x-sqlite3'),
-            'shp': ('ESRI Shapefile', '.shp', 'application/zip'),
-            'dxf': ('DXF', '.dxf', 'application/dxf'),
-        }
-        
-        driver, ext, mime = drivers.get(output_format, ('GeoJSON', '.geojson', 'application/json'))
-        mime_type = mime
-        
-        out_name = f"export{ext}"
-        out_full_path = os.path.join(tmp_out_dir, out_name)
-        
-        if output_format == 'shp':
-            # Shapefiles are multi-file; write to folder then zip
-            shp_dir = os.path.join(tmp_out_dir, "shapefile_export")
-            os.makedirs(shp_dir, exist_ok=True)
-            gdf.to_file(os.path.join(shp_dir, out_name), driver=driver)
-            
-            # Zip the directory
-            shutil.make_archive(os.path.join(tmp_out_dir, "export"), 'zip', shp_dir)
-            output_path = os.path.join(tmp_out_dir, "export.zip")
-        else:
-            gdf.to_file(out_full_path, driver=driver)
-            output_path = out_full_path
-
-    return gdf, output_path, mime_type
-
-def process_raster(file_path, target_crs=None, output_format=None):
-    """
-    Loads, reprojects, and converts raster data using Rioxarray/Rasterio.
-    """
-    # 1. Load Raster (masked=True hides nodata values)
-    xds = rxr.open_rasterio(file_path, masked=True)
-    
-    # 2. Reproject
-    if target_crs:
-        try:
-            # Rioxarray handles the warping math
-            xds = xds.rio.reproject(target_crs)
-        except Exception as e:
-            st.error(f"Reprojection Error: {e}")
-
-    # 3. Export
-    output_path = None
-    mime_type = "image/tiff"
-    
-    if output_format:
-        tmp_out = tempfile.NamedTemporaryFile(delete=False, suffix=f".{output_format}")
-        output_path = tmp_out.name
-        tmp_out.close()
-        
-        if output_format == 'tif':
-            xds.rio.to_raster(output_path)
-        elif output_format == 'png':
-            # Simplified PNG export (visual only, loses georeference usually unless worldfile included)
-            # For strict GIS use, we usually stick to GeoTIFF/COG
-            xds.rio.to_raster(output_path, driver="PNG")
-            mime_type = "image/png"
-            
-    return xds, output_path, mime_type
-
-# --- UI Layout ---
+# --- Main App Logic ---
 
 def main():
-    st.sidebar.title("🛠️ Geo-Toolbox")
-    app_mode = st.sidebar.radio("Select Module", ["Vector Operations", "Raster Operations", "GEE Satellite Data"])
+    st.title("🌍 GeoConvert Pro")
+    st.markdown("### Universal Vector Data Converter & ETL Tool")
+    st.markdown("Convert between **Shapefile, GeoPackage, GeoJSON, KML, CSV, Excel** and more. Supports CRS reprojection and attribute handling.")
 
-    st.markdown("## 🛰️ Geospatial Inspection & Conversion Hub")
-    st.markdown("---")
+    # 1. Sidebar: Controls
+    with st.sidebar:
+        st.header("1. Input Data")
+        uploaded_file = st.file_uploader(
+            "Upload geospatial file (Drag & drop)", 
+            type=['zip', 'shp', 'geojson', 'json', 'kml', 'gpkg', 'csv', 'xlsx', 'gpx', 'tab'],
+            help="For Shapefiles, upload a .zip containing .shp, .shx, and .dbf"
+        )
 
-    # --- VECTOR MODULE ---
-    if app_mode == "Vector Operations":
-        st.subheader("Vector ETL (Shapefile, GeoJSON, CSV, GPKG)")
-        
-        uploaded_file = st.file_uploader("Upload Vector File", type=['zip', 'geojson', 'gpkg', 'csv', 'kml'])
-        
-        if uploaded_file:
-            with st.spinner("Uploading and analyzing..."):
-                try:
-                    local_path = save_uploaded_file(uploaded_file)
+        st.header("2. Processing Settings")
+        enable_reprojection = st.checkbox("Reproject Coordinates", value=False)
+        target_epsg = st.number_input("Target EPSG Code (e.g., 3857 for Web Mercator)", min_value=1, value=4326, disabled=not enable_reprojection)
+
+        st.header("3. Output Settings")
+        output_format = st.selectbox(
+            "Target Format",
+            [
+                "ESRI Shapefile (.zip)", 
+                "GeoJSON", 
+                "GeoPackage (.gpkg)", 
+                "KML", 
+                "GML", 
+                "FlatGeobuf",
+                "CSV (WKT)",
+                "Excel (.xlsx)",
+            ]
+        )
+
+    # 2. Main Processing Block
+    if uploaded_file:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            file_path = save_uploaded_file(uploaded_file, tmp_dir)
+            
+            # --- Loading Logic ---
+            try:
+                gdf = None
+                
+                # Handling Zipped Shapefiles or regular Zips
+                if file_path.endswith('.zip'):
+                    extract_dir = os.path.join(tmp_dir, "extracted")
+                    os.makedirs(extract_dir, exist_ok=True)
+                    main_file = extract_zip(file_path, extract_dir)
+                    if main_file:
+                        gdf = gpd.read_file(main_file)
+                        st.info(f"📂 Read inside zip: `{os.path.basename(main_file)}`")
+                    else:
+                        st.error("Could not find valid spatial data inside the ZIP.")
+                
+                # Handling Tabular Data (CSV/Excel)
+                elif file_path.endswith('.csv') or file_path.endswith('.xlsx'):
+                    if file_path.endswith('.csv'):
+                        df = pd.read_csv(file_path)
+                    else:
+                        df = pd.read_excel(file_path)
                     
-                    # CSV Pre-check for Lat/Lon
-                    lat_col, lon_col = None, None
-                    if uploaded_file.name.endswith('.csv'):
-                        df_preview = pd.read_csv(local_path, nrows=0) # Read header only
-                        cols = df_preview.columns.tolist()
-                        c1, c2 = st.columns(2)
-                        lat_col = c1.selectbox("Latitude Column", cols)
-                        lon_col = c2.selectbox("Longitude Column", cols)
+                    st.write("### 🛠️ Tabular Data Configuration")
+                    st.dataframe(df.head(3))
                     
-                    # Load Data
-                    gdf, _, _ = process_vector(local_path, lat_col=lat_col, lon_col=lon_col)
+                    col1, col2 = st.columns(2)
+                    mode = col1.radio("Geometry Source", ["Lat/Lon Columns", "WKT Column"])
                     
-                    if gdf is not None:
-                        # --- Layout: Inspection ---
-                        c_info, c_map = st.columns([1, 2])
+                    if mode == "Lat/Lon Columns":
+                        lon_col = col2.selectbox("Select Longitude (X)", df.columns, index=min(1, len(df.columns)-1))
+                        lat_col = col2.selectbox("Select Latitude (Y)", df.columns, index=min(2, len(df.columns)-1))
+                        if st.button("Create Geometry from XY"):
+                            gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df[lon_col], df[lat_col]), crs="EPSG:4326")
+                    else:
+                        wkt_col = col2.selectbox("Select WKT Column", df.columns)
+                        if st.button("Parse WKT"):
+                            from shapely import wkt
+                            df['geometry'] = df[wkt_col].apply(wkt.loads)
+                            gdf = gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")
+
+                # Handling Standard Vector Files
+                else:
+                    gdf = gpd.read_file(file_path)
+
+                # --- Processing & Visualization ---
+                if gdf is not None:
+                    st.divider()
+                    col_info, col_map = st.columns([1, 2])
+                    
+                    with col_info:
+                        st.subheader("📊 Metadata")
+                        st.write(f"**CRS:** {gdf.crs}")
+                        st.write(f"**Features:** {len(gdf)}")
+                        st.write(f"**Columns:** {list(gdf.columns)}")
+                        st.write(f"**Geometry Type:** {gdf.geom_type.unique()}")
                         
-                        with c_info:
-                            st.markdown("### 📋 Metadata")
-                            st.info(f"**CRS:** {gdf.crs}")
-                            st.write(f"**Features:** {len(gdf)}")
-                            st.write(f"**Geometry:** {gdf.geom_type.mode()[0] if not gdf.empty else 'N/A'}")
-                            st.write("**Attribute Sample:**")
-                            st.dataframe(gdf.drop(columns='geometry').head(3), hide_index=True)
-                        
-                        with c_map:
-                            st.markdown("### 🗺️ Preview")
-                            # Reproject for Web Map (Folium requires EPSG:4326)
-                            m = geemap.Map()
+                        # Show raw data table
+                        with st.expander("View Attribute Table"):
+                            st.dataframe(gdf.drop(columns='geometry').head(10))
+
+                    with col_map:
+                        st.subheader("🗺️ Preview")
+                        # Simplified map for performance
+                        try:
+                            # Convert to WGS84 for mapping if not already
+                            map_gdf = gdf.to_crs(epsg=4326) if gdf.crs else gdf
+                            st.map(map_gdf)
+                        except Exception as e:
+                            st.warning("Could not render map preview (geometry might be complex or empty).")
+
+                    # --- Reprojection ---
+                    if enable_reprojection:
+                        with st.spinner(f"Reprojecting to EPSG:{target_epsg}..."):
+                            try:
+                                gdf = convert_crs(gdf, f"EPSG:{target_epsg}")
+                                st.success(f"Reprojected to EPSG:{target_epsg}")
+                            except Exception as e:
+                                st.error(f"Reprojection Failed: {e}")
+
+                    # --- Conversion & Download ---
+                    st.divider()
+                    st.subheader("📥 Conversion Export")
+                    
+                    convert_btn = st.button(f"Convert to {output_format}")
+                    
+                    if convert_btn:
+                        with st.spinner("Converting..."):
+                            out_dir = os.path.join(tmp_dir, "output")
+                            os.makedirs(out_dir, exist_ok=True)
                             
-                            # Simplify geometry for performance if too large
-                            map_gdf = gdf.to_crs("EPSG:4326")
-                            if len(map_gdf) > 1000:
-                                map_gdf = map_gdf.simplify(tolerance=0.001) # Approx 100m simplification
-                                st.warning("Geometry simplified for web rendering.")
-                                
-                            m.add_data(map_gdf, layer_name="User Data")
-                            m.centerObject(map_gdf)
-                            m.to_streamlit(height=400)
-
-                        # --- Layout: Transformation ---
-                        st.markdown("### 🔄 Conversion & Reprojection")
-                        col_crs, col_fmt, col_btn = st.columns([2, 1, 1])
-                        
-                        target_crs = col_crs.text_input("Target EPSG (e.g., EPSG:3857)", value="EPSG:4326")
-                        out_format = col_fmt.selectbox("Format", ["geojson", "shp", "gpkg", "dxf"])
-                        
-                        if col_btn.button("Convert File"):
-                            with st.spinner("Processing..."):
-                                _, out_path, mime = process_vector(local_path, target_crs=target_crs, output_format=out_format, lat_col=lat_col, lon_col=lon_col)
-                                
-                                if out_path:
-                                    with open(out_path, "rb") as f:
-                                        st.download_button(
-                                            "Download Converted File", 
-                                            f, 
-                                            file_name=f"processed_vector.{out_format.replace('shp','zip')}",
-                                            mime=mime
-                                        )
-                                    st.success("Conversion successful.")
+                            output_filename = "converted_data"
+                            final_path = None
+                            mime_type = "application/octet-stream"
+                            
+                            try:
+                                # Driver Selection & Handling
+                                if "Shapefile" in output_format:
+                                    # Shapefile requires a folder, then zipping
+                                    shp_path = os.path.join(out_dir, f"{output_filename}.shp")
+                                    gdf.to_file(shp_path, driver="ESRI Shapefile", encoding='utf-8')
+                                    # Create ZIP of the output directory components
+                                    final_buffer = make_zip(out_dir, f"{output_filename}.zip")
+                                    mime_type = "application/zip"
+                                    file_ext = ".zip"
                                     
-                except Exception as e:
-                    st.error(f"Error processing file: {e}")
+                                elif "GeoJSON" in output_format:
+                                    final_path = os.path.join(out_dir, f"{output_filename}.geojson")
+                                    gdf.to_file(final_path, driver="GeoJSON")
+                                    file_ext = ".geojson"
+                                    mime_type = "application/json"
+                                    
+                                elif "GeoPackage" in output_format:
+                                    final_path = os.path.join(out_dir, f"{output_filename}.gpkg")
+                                    gdf.to_file(final_path, driver="GPKG")
+                                    file_ext = ".gpkg"
+                                    
+                                elif "KML" in output_format:
+                                    final_path = os.path.join(out_dir, f"{output_filename}.kml")
+                                    # KML doesn't support all column types perfectly, so we convert columns to string usually
+                                    # But fiona usually handles it. 
+                                    gdf.to_file(final_path, driver="KML")
+                                    file_ext = ".kml"
+                                    mime_type = "application/vnd.google-earth.kml+xml"
 
+                                elif "FlatGeobuf" in output_format:
+                                    final_path = os.path.join(out_dir, f"{output_filename}.fgb")
+                                    gdf.to_file(final_path, driver="FlatGeobuf")
+                                    file_ext = ".fgb"
+                                    
+                                elif "CSV" in output_format:
+                                    final_path = os.path.join(out_dir, f"{output_filename}.csv")
+                                    # Convert geometry to WKT
+                                    csv_gdf = gdf.copy()
+                                    csv_gdf['geometry'] = csv_gdf.geometry.to_wkt()
+                                    csv_gdf.to_csv(final_path, index=False)
+                                    file_ext = ".csv"
+                                    mime_type = "text/csv"
+                                    
+                                elif "Excel" in output_format:
+                                    final_path = os.path.join(out_dir, f"{output_filename}.xlsx")
+                                    excel_gdf = gdf.copy()
+                                    # Convert geometry to string/WKT because Excel doesn't store native geom
+                                    excel_gdf['geometry'] = excel_gdf.geometry.astype(str)
+                                    excel_gdf.to_excel(final_path, index=False)
+                                    file_ext = ".xlsx"
+                                    mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-    # --- RASTER MODULE ---
-    elif app_mode == "Raster Operations":
-        st.subheader("Raster ETL (GeoTIFF, COG)")
-        uploaded_raster = st.file_uploader("Upload GeoTIFF", type=['tif', 'tiff'])
-        
-        if uploaded_raster:
-            local_path = save_uploaded_file(uploaded_raster)
-            
-            # Load
-            xds, _, _ = process_raster(local_path)
-            
-            c1, c2 = st.columns([1, 2])
-            with c1:
-                st.markdown("### 📋 Raster Metadata")
-                st.write(f"**Dimensions:** {xds.rio.width} x {xds.rio.height}")
-                st.write(f"**Bands:** {xds.rio.count}")
-                st.write(f"**CRS:** {xds.rio.crs}")
-                st.write(f"**Resolution:** {xds.rio.resolution()}")
-                
-            with c2:
-                # Basic visualization of first band
-                st.markdown("### 🖼️ Quick View (Band 1)")
-                # Downsample for display speed
-                xds_small = xds.isel(x=slice(0, None, 10), y=slice(0, None, 10))
-                st.image(xds_small[0].values, caption="Band 1 (Resampled)", clamp=True, channels='GRAY')
+                                # --- Serve Download ---
+                                if "Shapefile" in output_format:
+                                    st.download_button(
+                                        label=f"Download {output_format}",
+                                        data=final_buffer,
+                                        file_name=f"geoconvert_export{file_ext}",
+                                        mime=mime_type
+                                    )
+                                else:
+                                    with open(final_path, "rb") as f:
+                                        st.download_button(
+                                            label=f"Download {output_format}",
+                                            data=f,
+                                            file_name=f"geoconvert_export{file_ext}",
+                                            mime=mime_type
+                                        )
+                                        
+                                st.success("Conversion successful!")
 
-            st.markdown("---")
-            st.markdown("### 🔄 Reproject & Export")
+                            except Exception as e:
+                                st.error(f"Conversion Error: {e}")
+                                st.warning("Tip: KML supports limited attributes. Shapefile column names truncated at 10 chars.")
             
-            rc1, rc2, rc3 = st.columns([2, 1, 1])
-            target_crs_r = rc1.text_input("Target CRS (EPSG)", "EPSG:3857")
-            r_fmt = rc2.selectbox("Format", ["tif", "png"])
-            
-            if rc3.button("Process Raster"):
-                _, out_p, r_mime = process_raster(local_path, target_crs=target_crs_r, output_format=r_fmt)
-                if out_p:
-                    with open(out_p, "rb") as f:
-                        st.download_button("Download Raster", f, file_name=f"processed_raster.{r_fmt}", mime=r_mime)
-
-
-    # --- GEE MODULE ---
-    elif app_mode == "GEE Satellite Data":
-        st.subheader("Google Earth Engine Export")
-        
-        # Authentication Check
-        try:
-            ee.Initialize()
-        except Exception as e:
-            st.error("GEE Authentication failed. Please run `earthengine authenticate` locally or set GOOGLE_APPLICATION_CREDENTIALS.")
-            st.stop()
-            
-        st.markdown("Define Area of Interest (AoI) and Date Range for Sentinel-2 MSI data.")
-        
-        # Inputs
-        c_date, c_loc = st.columns(2)
-        start_date = c_date.date_input("Start Date", pd.to_datetime("2023-01-01"))
-        end_date = c_date.date_input("End Date", pd.to_datetime("2023-01-30"))
-        
-        coords = c_loc.text_input("Lat, Lon (Center Point)", "28.6139, 77.2090") # Delhi default
-        try:
-            lat, lon = map(float, coords.split(','))
-        except:
-            lat, lon = 28.6139, 77.2090
-            
-        roi = ee.Geometry.Point([lon, lat]).buffer(5000) # 5km buffer
-        
-        # Generate Composite
-        if st.button("Generate Sentinel-2 Composite"):
-            with st.spinner("Querying Google Earth Engine..."):
-                # S2_SR_HARMONIZED: Sentinel-2 Surface Reflectance
-                # Filtering logic: Date -> Bounds -> Cloud Cover
-                s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")\
-                    .filterBounds(roi)\
-                    .filterDate(str(start_date), str(end_date))\
-                    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10))\
-                    .median()\
-                    .clip(roi)
-                
-                # Visualization parameters (False Color Infrared: NIR, Red, Green)
-                vis_params = {'min': 0, 'max': 3000, 'bands': ['B8', 'B4', 'B3']}
-                
-                # Render Map
-                m = geemap.Map()
-                m.centerObject(roi, 12)
-                m.addLayer(s2, vis_params, "Sentinel-2 (NIR/Red/Green)")
-                m.addLayer(roi, {'color': 'red'}, "AOI")
-                
-                # Store in session state for export
-                st.session_state['gee_asset'] = s2
-                st.session_state['gee_roi'] = roi
-                
-                m.to_streamlit(height=500)
-                
-        # Export Logic
-        if 'gee_asset' in st.session_state:
-            st.markdown("### Export Data")
-            if st.button("Export Image to Drive"):
-                # Note: This creates a task in the user's GEE account
-                task = ee.batch.Export.image.toDrive(
-                    image=st.session_state['gee_asset'],
-                    description=f'S2_Export_{datetime.now().strftime("%Y%m%d")}',
-                    folder='Streamlit_Exports',
-                    region=st.session_state['gee_roi'],
-                    scale=10, # Sentinel-2 10m resolution
-                    crs='EPSG:4326',
-                    maxPixels=1e9
-                )
-                task.start()
-                st.success(f"Export Task Started! ID: {task.id}. Check your Code Editor/Task Manager.")
+            except Exception as e:
+                st.error(f"Error loading file: {e}")
 
 if __name__ == "__main__":
     main()
