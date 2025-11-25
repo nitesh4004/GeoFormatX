@@ -4,8 +4,9 @@ import pandas as pd
 import fiona
 import os
 import tempfile
-import gdown  # For Google Drive
-import requests  # For GitHub
+import gdown
+import requests
+import zipfile
 from zipfile import ZipFile
 from io import BytesIO
 import glob
@@ -37,13 +38,20 @@ st.markdown("""
 
 @st.cache_data(show_spinner=False)
 def load_drive_data(file_id):
-    """Downloads District Database from Google Drive using gdown."""
+    """Downloads District Database from Google Drive using gdown with validation."""
     url = f'https://drive.google.com/uc?id={file_id}'
     temp_dir = tempfile.mkdtemp()
     zip_path = os.path.join(temp_dir, "drive_data.zip")
     
     try:
+        # Download
         gdown.download(url, zip_path, quiet=True, fuzzy=True)
+        
+        # Validate it is actually a ZIP
+        if not zipfile.is_zipfile(zip_path):
+            st.error("Error: The downloaded file from Drive is not a valid ZIP.")
+            return None
+            
         return extract_and_read(zip_path, temp_dir)
     except Exception as e:
         st.error(f"Failed to load Drive data: {e}")
@@ -51,8 +59,7 @@ def load_drive_data(file_id):
 
 @st.cache_data(show_spinner=False)
 def load_github_data(url):
-    """Downloads State Boundary from GitHub (Raw)."""
-    # Convert 'blob' to 'raw' if necessary
+    """Downloads State Boundary from GitHub."""
     raw_url = url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
     temp_dir = tempfile.mkdtemp()
     zip_path = os.path.join(temp_dir, "github_data.zip")
@@ -60,28 +67,52 @@ def load_github_data(url):
     try:
         response = requests.get(raw_url)
         response.raise_for_status()
+        
         with open(zip_path, "wb") as f:
             f.write(response.content)
+            
+        if not zipfile.is_zipfile(zip_path):
+            st.error("Error: The downloaded file from GitHub is not a valid ZIP.")
+            return None
+            
         return extract_and_read(zip_path, temp_dir)
     except Exception as e:
         st.error(f"Failed to load GitHub data: {e}")
         return None
 
 def extract_and_read(zip_path, temp_dir):
-    """Helper to unzip and read the first shapefile found."""
-    if not os.path.exists(zip_path) or os.path.getsize(zip_path) == 0:
+    """
+    Unzips and reads the shapefile. 
+    Crucial: Uses engine='fiona' to avoid pyogrio errors on Streamlit Cloud.
+    """
+    try:
+        with ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(temp_dir)
+        
+        # Find all shapefiles
+        shapefiles = []
+        for root, dirs, files in os.walk(temp_dir):
+            for file in files:
+                if file.endswith(".shp"):
+                    shapefiles.append(os.path.join(root, file))
+        
+        if not shapefiles:
+            return None
+            
+        # Use the first shapefile found
+        target_file = shapefiles[0]
+        
+        # Check for sidecar files (.shx, .dbf)
+        base_name = os.path.splitext(target_file)[0]
+        if not os.path.exists(base_name + ".shx") or not os.path.exists(base_name + ".dbf"):
+            st.warning("⚠️ Warning: Missing .shx or .dbf sidecar files. The shapefile may be corrupt.")
+        
+        # FIXED: Explicitly use fiona engine
+        return gpd.read_file(target_file, engine='fiona')
+        
+    except Exception as e:
+        st.error(f"Error reading shapefile: {e}")
         return None
-
-    with ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall(temp_dir)
-        
-    spatial_files = []
-    for ext in ['*.shp']:
-        spatial_files.extend(glob.glob(os.path.join(temp_dir, '**', ext), recursive=True))
-        
-    if spatial_files:
-        return gpd.read_file(spatial_files[0])
-    return None
 
 def save_uploaded_file(uploaded_file, temp_dir):
     try:
@@ -92,19 +123,6 @@ def save_uploaded_file(uploaded_file, temp_dir):
     except Exception as e:
         st.error(f"Error saving file: {e}")
         return None
-
-def extract_zip_uploaded(zip_path, extract_to):
-    with ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall(extract_to)
-    
-    spatial_files = []
-    for ext in ['*.shp', '*.gpkg', '*.geojson', '*.kml', '*.json', '*.tab']:
-        spatial_files.extend(glob.glob(os.path.join(extract_to, '**', ext), recursive=True))
-    
-    shp_files = [f for f in spatial_files if f.endswith('.shp')]
-    if shp_files:
-        return shp_files[0]
-    return spatial_files[0] if spatial_files else None
 
 def make_zip(source_dir, output_filename):
     zip_buffer = BytesIO()
@@ -128,7 +146,9 @@ def clean_text_data(gdf):
     target_cols = ['District', 'STATE', 'district', 'state', 'Name', 'name']
     for col in target_cols:
         if col in gdf.columns:
+            # Check if column allows string operations
             if pd.api.types.is_string_dtype(gdf[col]) or pd.api.types.is_object_dtype(gdf[col]):
+                # Convert to string to avoid errors with non-string objects
                 if gdf[col].astype(str).str.contains('>').any():
                     gdf[col] = gdf[col].astype(str).str.replace('>', 'A')
                     cleaned = True
@@ -146,25 +166,26 @@ def handle_export(gdf, output_format, tmp_dir, file_prefix="export"):
     try:
         if "Shapefile" in output_format:
             shp_path = os.path.join(out_dir, f"{file_prefix}.shp")
-            gdf.to_file(shp_path, driver="ESRI Shapefile", encoding='utf-8')
+            # engine='fiona' implicitly used by to_file default or can be specified
+            gdf.to_file(shp_path, driver="ESRI Shapefile", encoding='utf-8', engine='fiona')
             final_buffer = make_zip(out_dir, f"{file_prefix}.zip")
             file_ext = ".zip"
             mime_type = "application/zip"
             
         elif "GeoJSON" in output_format:
             final_path = os.path.join(out_dir, f"{file_prefix}.geojson")
-            gdf.to_file(final_path, driver="GeoJSON")
+            gdf.to_file(final_path, driver="GeoJSON", engine='fiona')
             file_ext = ".geojson"
             mime_type = "application/json"
             
         elif "GeoPackage" in output_format:
             final_path = os.path.join(out_dir, f"{file_prefix}.gpkg")
-            gdf.to_file(final_path, driver="GPKG")
+            gdf.to_file(final_path, driver="GPKG", engine='fiona')
             file_ext = ".gpkg"
             
         elif "KML" in output_format:
             final_path = os.path.join(out_dir, f"{file_prefix}.kml")
-            gdf.to_file(final_path, driver="KML")
+            gdf.to_file(final_path, driver="KML", engine='fiona')
             file_ext = ".kml"
             mime_type = "application/vnd.google-earth.kml+xml"
 
@@ -231,14 +252,13 @@ def main():
     # A. Data Loading Strategy
     if data_source == "🇮🇳 District Database (Default)":
         with st.spinner("Connecting to District Database (via gdown)..."):
-            # District ID from previous context
             gdf = load_drive_data('1tMyiUheQBcwwPwZQla67PwC5-AqenTmv')
             if gdf is not None:
                 st.success(f"✅ Loaded {len(gdf)} Districts")
 
     elif data_source == "🗺️ State Boundary (GitHub)":
         with st.spinner("Connecting to State Repository (via GitHub)..."):
-            # Direct GitHub URL provided by user
+            # Direct GitHub URL
             state_url = "https://github.com/nitesh4004/GeoFormatX/blob/main/STATE_BOUNDARY.zip"
             gdf = load_github_data(state_url)
             if gdf is not None:
@@ -247,14 +267,17 @@ def main():
     elif uploaded_file:
         with tempfile.TemporaryDirectory() as tmp_dir:
             file_path = save_uploaded_file(uploaded_file, tmp_dir)
+            
+            # Case 1: ZIP (Shapefile)
             if file_path.endswith('.zip'):
-                extract_dir = os.path.join(tmp_dir, "extracted")
-                os.makedirs(extract_dir, exist_ok=True)
-                main_file = extract_zip_uploaded(file_path, extract_dir)
-                if main_file:
-                    gdf = gpd.read_file(main_file)
-                    st.info(f"📂 Read: {os.path.basename(main_file)}")
-            # ... (Existing CSV/Excel logic can remain here if needed) ...
+                if not zipfile.is_zipfile(file_path):
+                     st.error("Uploaded file is not a valid ZIP.")
+                else:
+                    gdf = extract_and_read(file_path, tmp_dir)
+                    if gdf is not None:
+                         st.info(f"📂 Read successfully")
+
+            # Case 2: Tabular (CSV/Excel)
             elif file_path.endswith(('.csv', '.xlsx')):
                 df = pd.read_csv(file_path) if file_path.endswith('.csv') else pd.read_excel(file_path)
                 st.write("### 🛠️ Tabular Configuration")
@@ -274,8 +297,13 @@ def main():
                             gdf = gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")
                         except Exception as e:
                             st.error(f"WKT Error: {e}")
+            # Case 3: Other Vectors
             else:
-                gdf = gpd.read_file(file_path)
+                try:
+                    # FIXED: Added engine='fiona' here too
+                    gdf = gpd.read_file(file_path, engine='fiona')
+                except Exception as e:
+                    st.error(f"Error reading file: {e}")
 
     # B. Data Processing & Visualization
     if gdf is not None:
@@ -295,7 +323,6 @@ def main():
                 st.subheader("📊 Metadata")
                 st.write(f"**Features:** {len(gdf)}")
                 st.write(f"**CRS:** {gdf.crs}")
-                # Show first 5 columns to help user verify data
                 st.write(f"**Attributes:** {list(gdf.columns[:5])}") 
 
             with col_map:
@@ -312,16 +339,14 @@ def main():
             st.write("---")
             st.markdown("### 📍 Location Extractor")
             
-            # Identify Column Structure
             has_district = 'District' in gdf.columns
             has_state = 'STATE' in gdf.columns
 
-            # Layout Columns
             dc1, dc2, dc3 = st.columns(3)
             selected_feature = None
             filename_suffix = ""
 
-            # LOGIC 1: State + District Data
+            # LOGIC 1: State + District
             if has_state and has_district:
                 states_list = sorted(gdf['STATE'].astype(str).unique())
                 selected_state = dc1.selectbox("1. Select State", states_list)
@@ -335,21 +360,19 @@ def main():
                 ]
                 filename_suffix = f"{selected_district}_{selected_state}"
             
-            # LOGIC 2: State Boundary Data Only
+            # LOGIC 2: State Boundary Only
             elif has_state and not has_district:
                 states_list = sorted(gdf['STATE'].astype(str).unique())
                 selected_state = dc1.selectbox("1. Select State to Extract", states_list)
-                
-                dc2.info("ℹ️ State-level dataset detected. District selection disabled.")
+                dc2.info("ℹ️ State-level data detected.")
                 
                 selected_feature = gdf[gdf['STATE'] == selected_state]
                 filename_suffix = f"{selected_state}_Boundary"
-
-            # LOGIC 3: Unknown Custom Data
+            
             else:
-                st.warning("Could not detect standard 'STATE' or 'District' columns for auto-extraction.")
+                st.warning("Could not detect standard 'STATE' or 'District' columns.")
 
-            # DOWNLOAD ACTION
+            # DOWNLOAD
             if selected_feature is not None:
                 with dc3:
                     st.write(f"3. Export ({output_format})")
@@ -358,12 +381,11 @@ def main():
                             selected_feature, output_format, tmp_dir, 
                             file_prefix=filename_suffix
                         )
-                        
                         if f_buff:
-                            st.download_button(f"📥 Download {filename_suffix}", f_buff, f"{filename_suffix}{f_ext}", mime=f_mime)
+                            st.download_button(f"Download {filename_suffix}", f_buff, f"{filename_suffix}{f_ext}", mime=f_mime)
                         elif f_path:
                             with open(f_path, "rb") as f:
-                                st.download_button(f"📥 Download {filename_suffix}", f, f"{filename_suffix}{f_ext}", mime=f_mime)
+                                st.download_button(f"Download {filename_suffix}", f, f"{filename_suffix}{f_ext}", mime=f_mime)
 
             # Global Download
             st.write("---")
