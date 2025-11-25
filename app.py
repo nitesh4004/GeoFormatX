@@ -3,9 +3,9 @@ import geopandas as gpd
 import pandas as pd
 import fiona
 import os
-import shutil
 import tempfile
-import gdown  # New dependency for robust Drive downloads
+import gdown  # For Google Drive
+import requests  # For GitHub
 from zipfile import ZipFile
 from io import BytesIO
 import glob
@@ -13,7 +13,7 @@ from shapely import wkt
 
 # --- 1. Configuration & Drivers ---
 st.set_page_config(
-    page_title="GeoConvert Pro | India District Portal",
+    page_title="GeoConvert Pro | India Portal",
     page_icon="🇮🇳",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -36,46 +36,52 @@ st.markdown("""
 # --- 3. Helper Functions ---
 
 @st.cache_data(show_spinner=False)
-def load_default_data():
-    """
-    Downloads and caches the District Boundary from Google Drive using gdown.
-    gdown handles large file warnings and tokens automatically.
-    """
-    # Your specific Google Drive File ID
-    file_id = '1tMyiUheQBcwwPwZQla67PwC5-AqenTmv'
-    # Construct the URL for gdown
+def load_drive_data(file_id):
+    """Downloads District Database from Google Drive using gdown."""
     url = f'https://drive.google.com/uc?id={file_id}'
-    
     temp_dir = tempfile.mkdtemp()
-    zip_path = os.path.join(temp_dir, "default_districts.zip")
+    zip_path = os.path.join(temp_dir, "drive_data.zip")
     
     try:
-        # Using gdown for robust download
-        # quiet=True suppresses standard output logs
         gdown.download(url, zip_path, quiet=True, fuzzy=True)
-        
-        # Verify file exists and is not empty
-        if not os.path.exists(zip_path) or os.path.getsize(zip_path) == 0:
-            st.error("Download failed or file is empty.")
-            return None
-
-        with ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(temp_dir)
-            
-        spatial_files = []
-        # Search for shapefiles recursively
-        for ext in ['*.shp']:
-            spatial_files.extend(glob.glob(os.path.join(temp_dir, '**', ext), recursive=True))
-            
-        if spatial_files:
-            return gpd.read_file(spatial_files[0])
-        else:
-            st.error("Default database error: No Shapefile found in the downloaded archive.")
-            return None
-            
+        return extract_and_read(zip_path, temp_dir)
     except Exception as e:
-        st.error(f"Failed to load default database: {e}")
+        st.error(f"Failed to load Drive data: {e}")
         return None
+
+@st.cache_data(show_spinner=False)
+def load_github_data(url):
+    """Downloads State Boundary from GitHub (Raw)."""
+    # Convert 'blob' to 'raw' if necessary
+    raw_url = url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
+    temp_dir = tempfile.mkdtemp()
+    zip_path = os.path.join(temp_dir, "github_data.zip")
+    
+    try:
+        response = requests.get(raw_url)
+        response.raise_for_status()
+        with open(zip_path, "wb") as f:
+            f.write(response.content)
+        return extract_and_read(zip_path, temp_dir)
+    except Exception as e:
+        st.error(f"Failed to load GitHub data: {e}")
+        return None
+
+def extract_and_read(zip_path, temp_dir):
+    """Helper to unzip and read the first shapefile found."""
+    if not os.path.exists(zip_path) or os.path.getsize(zip_path) == 0:
+        return None
+
+    with ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall(temp_dir)
+        
+    spatial_files = []
+    for ext in ['*.shp']:
+        spatial_files.extend(glob.glob(os.path.join(temp_dir, '**', ext), recursive=True))
+        
+    if spatial_files:
+        return gpd.read_file(spatial_files[0])
+    return None
 
 def save_uploaded_file(uploaded_file, temp_dir):
     try:
@@ -87,16 +93,14 @@ def save_uploaded_file(uploaded_file, temp_dir):
         st.error(f"Error saving file: {e}")
         return None
 
-def extract_zip(zip_path, extract_to):
+def extract_zip_uploaded(zip_path, extract_to):
     with ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall(extract_to)
     
     spatial_files = []
-    # Priority search for spatial formats
     for ext in ['*.shp', '*.gpkg', '*.geojson', '*.kml', '*.json', '*.tab']:
         spatial_files.extend(glob.glob(os.path.join(extract_to, '**', ext), recursive=True))
     
-    # Prioritize Shapefile if multiple exist
     shp_files = [f for f in spatial_files if f.endswith('.shp')]
     if shp_files:
         return shp_files[0]
@@ -113,7 +117,6 @@ def make_zip(source_dir, output_filename):
     return zip_buffer
 
 def convert_crs(gdf, target_crs):
-    """Reprojects the GeoDataFrame to the target coordinate reference system."""
     if gdf.crs is None:
         st.warning("⚠️ Input data has no defined CRS. Assuming WGS84 (EPSG:4326).")
         gdf.set_crs(epsg=4326, inplace=True)
@@ -190,15 +193,19 @@ def handle_export(gdf, output_format, tmp_dir, file_prefix="export"):
 # --- 4. Main Application Logic ---
 
 def main():
-    st.title("🌍 GeoConvert Pro | India District Portal")
-    st.markdown("### Universal Vector Data Converter & District Extractor")
+    st.title("🌍 GeoConvert Pro | India Portal")
+    st.markdown("### Universal Vector Data Converter & Extractor")
 
     # --- SIDEBAR ---
     with st.sidebar:
         st.header("1. Data Source")
         data_source = st.radio(
             "Select Source",
-            ["🇮🇳 India District Database (Default)", "📂 Upload Custom File"]
+            [
+                "🇮🇳 District Database (Default)", 
+                "🗺️ State Boundary (GitHub)",
+                "📂 Upload Custom File"
+            ]
         )
         
         uploaded_file = None
@@ -222,38 +229,41 @@ def main():
     gdf = None
     
     # A. Data Loading Strategy
-    if data_source == "🇮🇳 India District Database (Default)":
+    if data_source == "🇮🇳 District Database (Default)":
         with st.spinner("Connecting to District Database (via gdown)..."):
-            gdf = load_default_data()
+            # District ID from previous context
+            gdf = load_drive_data('1tMyiUheQBcwwPwZQla67PwC5-AqenTmv')
             if gdf is not None:
-                st.success("✅ Connected to India District Database")
+                st.success(f"✅ Loaded {len(gdf)} Districts")
+
+    elif data_source == "🗺️ State Boundary (GitHub)":
+        with st.spinner("Connecting to State Repository (via GitHub)..."):
+            # Direct GitHub URL provided by user
+            state_url = "https://github.com/nitesh4004/GeoFormatX/blob/main/STATE_BOUNDARY.zip"
+            gdf = load_github_data(state_url)
+            if gdf is not None:
+                st.success(f"✅ Loaded {len(gdf)} States")
 
     elif uploaded_file:
-        # Custom File Handling (Including Advanced CSV/Excel Logic)
         with tempfile.TemporaryDirectory() as tmp_dir:
             file_path = save_uploaded_file(uploaded_file, tmp_dir)
-            
-            # Case 1: ZIP (Shapefile)
             if file_path.endswith('.zip'):
                 extract_dir = os.path.join(tmp_dir, "extracted")
                 os.makedirs(extract_dir, exist_ok=True)
-                main_file = extract_zip(file_path, extract_dir)
+                main_file = extract_zip_uploaded(file_path, extract_dir)
                 if main_file:
                     gdf = gpd.read_file(main_file)
                     st.info(f"📂 Read: {os.path.basename(main_file)}")
-            
-            # Case 2: Tabular (CSV/Excel)
+            # ... (Existing CSV/Excel logic can remain here if needed) ...
             elif file_path.endswith(('.csv', '.xlsx')):
                 df = pd.read_csv(file_path) if file_path.endswith('.csv') else pd.read_excel(file_path)
                 st.write("### 🛠️ Tabular Configuration")
                 st.dataframe(df.head(3))
-                
                 col1, col2 = st.columns(2)
                 mode = col1.radio("Geometry Type", ["Lat/Lon Columns", "WKT Column"])
-                
                 if mode == "Lat/Lon Columns":
-                    lon_col = col2.selectbox("Longitude (X)", df.columns, index=min(1, len(df.columns)-1))
-                    lat_col = col2.selectbox("Latitude (Y)", df.columns, index=min(2, len(df.columns)-1))
+                    lon_col = col2.selectbox("Longitude (X)", df.columns)
+                    lat_col = col2.selectbox("Latitude (Y)", df.columns)
                     if st.button("Create Geometry"):
                         gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df[lon_col], df[lat_col]), crs="EPSG:4326")
                 else:
@@ -264,8 +274,6 @@ def main():
                             gdf = gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")
                         except Exception as e:
                             st.error(f"WKT Error: {e}")
-            
-            # Case 3: Standard Vectors
             else:
                 gdf = gpd.read_file(file_path)
 
@@ -273,11 +281,9 @@ def main():
     if gdf is not None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             
-            # 1. Auto-Clean Text (Fixing '>')
+            # 1. Auto-Clean Text
             gdf, cleaned = clean_text_data(gdf)
-            if cleaned:
-                st.info("✨ Auto-corrected text encoding issues (Replaced '>' with 'A').")
-
+            
             # 2. Reprojection
             if enable_reprojection:
                 gdf = convert_crs(gdf, f"EPSG:{target_epsg}")
@@ -289,84 +295,82 @@ def main():
                 st.subheader("📊 Metadata")
                 st.write(f"**Features:** {len(gdf)}")
                 st.write(f"**CRS:** {gdf.crs}")
-                st.write(f"**Geom:** {gdf.geom_type.unique()}")
-                with st.expander("View Data Table"):
-                    st.dataframe(gdf.drop(columns='geometry').head(10))
+                # Show first 5 columns to help user verify data
+                st.write(f"**Attributes:** {list(gdf.columns[:5])}") 
 
             with col_map:
                 st.subheader("🗺️ Preview")
                 try:
-                    # Map always needs Lat/Lon
                     map_gdf = gdf.to_crs(epsg=4326) if gdf.crs else gdf
                     st.map(map_gdf)
                 except:
                     st.write("Map preview unavailable.")
 
             # ==========================================
-            # 📍 FEATURE: DISTRICT EXTRACTOR
+            # 📍 FEATURE: SMART DATA EXTRACTOR
             # ==========================================
-            # Check for District/State columns (Case Sensitive)
+            st.write("---")
+            st.markdown("### 📍 Location Extractor")
+            
+            # Identify Column Structure
             has_district = 'District' in gdf.columns
             has_state = 'STATE' in gdf.columns
 
-            if has_district and has_state:
-                st.write("---")
-                st.markdown("### 📍 Select & Download District")
-                st.info("Use the filters below to extract a single district.")
-                
-                dc1, dc2, dc3 = st.columns(3)
-                
-                # 1. Select State
+            # Layout Columns
+            dc1, dc2, dc3 = st.columns(3)
+            selected_feature = None
+            filename_suffix = ""
+
+            # LOGIC 1: State + District Data
+            if has_state and has_district:
                 states_list = sorted(gdf['STATE'].astype(str).unique())
                 selected_state = dc1.selectbox("1. Select State", states_list)
                 
-                # 2. Select District (Filtered by State)
-                district_list = sorted(gdf[gdf['STATE'] == selected_state]['District'].astype(str).unique())
-                selected_district = dc2.selectbox("2. Select District", district_list)
+                districts_list = sorted(gdf[gdf['STATE'] == selected_state]['District'].astype(str).unique())
+                selected_district = dc2.selectbox("2. Select District", districts_list)
                 
-                # 3. Download Action
+                selected_feature = gdf[
+                    (gdf['STATE'] == selected_state) & 
+                    (gdf['District'] == selected_district)
+                ]
+                filename_suffix = f"{selected_district}_{selected_state}"
+            
+            # LOGIC 2: State Boundary Data Only
+            elif has_state and not has_district:
+                states_list = sorted(gdf['STATE'].astype(str).unique())
+                selected_state = dc1.selectbox("1. Select State to Extract", states_list)
+                
+                dc2.info("ℹ️ State-level dataset detected. District selection disabled.")
+                
+                selected_feature = gdf[gdf['STATE'] == selected_state]
+                filename_suffix = f"{selected_state}_Boundary"
+
+            # LOGIC 3: Unknown Custom Data
+            else:
+                st.warning("Could not detect standard 'STATE' or 'District' columns for auto-extraction.")
+
+            # DOWNLOAD ACTION
+            if selected_feature is not None:
                 with dc3:
-                    st.write(f"3. Download ({output_format})")
-                    if st.button(f"Generate {selected_district}"):
-                        # Create Subset
-                        subset_gdf = gdf[
-                            (gdf['STATE'] == selected_state) & 
-                            (gdf['District'] == selected_district)
-                        ]
-                        
-                        # Export
+                    st.write(f"3. Export ({output_format})")
+                    if st.button(f"Generate File"):
                         f_buff, f_path, f_ext, f_mime = handle_export(
-                            subset_gdf, output_format, tmp_dir, 
-                            file_prefix=f"{selected_district}_{selected_state}"
+                            selected_feature, output_format, tmp_dir, 
+                            file_prefix=filename_suffix
                         )
                         
-                        # Serve File
                         if f_buff:
-                            st.download_button(
-                                label=f"📥 Download {selected_district}",
-                                data=f_buff,
-                                file_name=f"{selected_district}{f_ext}",
-                                mime=f_mime
-                            )
+                            st.download_button(f"📥 Download {filename_suffix}", f_buff, f"{filename_suffix}{f_ext}", mime=f_mime)
                         elif f_path:
                             with open(f_path, "rb") as f:
-                                st.download_button(
-                                    label=f"📥 Download {selected_district}",
-                                    data=f,
-                                    file_name=f"{selected_district}{f_ext}",
-                                    mime=f_mime
-                                )
+                                st.download_button(f"📥 Download {filename_suffix}", f, f"{filename_suffix}{f_ext}", mime=f_mime)
 
-            # ==========================================
-            # 📤 GLOBAL DOWNLOAD
-            # ==========================================
+            # Global Download
             st.write("---")
             with st.expander("Advanced: Convert & Download Full Dataset"):
-                st.write("Export the entire loaded dataset in the selected format.")
                 if st.button("Process Full Dataset"):
                     with st.spinner("Processing..."):
                         f_buff, f_path, f_ext, f_mime = handle_export(gdf, output_format, tmp_dir, file_prefix="full_export")
-                        
                         if f_buff:
                             st.download_button("Download Full File", f_buff, f"converted_full{f_ext}", mime=f_mime)
                         elif f_path:
