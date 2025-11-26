@@ -74,11 +74,14 @@ def get_drive_repo(file_id):
     
     try:
         gdown.download(url, zip_path, quiet=True, fuzzy=True)
+        # Check if it's actually a zip
+        if not zipfile.is_zipfile(zip_path):
+             return "NOT_ZIP"
+             
         with ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(temp_dir)
         return temp_dir
     except Exception as e:
-        st.error(f"Failed to download/extract. Ensure the ID is for a .zip file, not a folder. Error: {e}")
         return None
 
 @st.cache_data(show_spinner=False)
@@ -250,39 +253,23 @@ def view_admin_downloader():
         
         # --- VILLAGE LOGIC (Multi-File) ---
         if "Villages" in source_type:
-            # ---------------------------------------------------------
-            # OPTION A: Hardcode ID here (Optional)
-            VILLAGE_ZIP_ID = "Please_Replace_With_Your_Zip_File_ID" 
-            # ---------------------------------------------------------
+            st.info("ℹ️ **Why do I need to Zip?** \nGoogle Drive doesn't let programs download 'Folders' directly. You must Right-Click your folder in Drive > **Download** (this creates a Zip) > Upload that Zip to Drive > Paste that Link here.")
             
-            drive_id_to_use = None
-
-            # If the code still has the placeholder, ask the user in the UI
-            if "Replace" in VILLAGE_ZIP_ID:
-                st.warning("⚠️ **Setup Required for Villages**")
-                st.markdown("""
-                1. **Zip** your 'Village of India' folder on Google Drive.
-                2. **Get the Link/ID** of that new `.zip` file (Ensure it is 'Anyone with link').
-                3. Paste the **File ID** below.
-                """)
-                user_input_id = st.text_input("Paste Google Drive Zip File ID here:", placeholder="e.g., 1xYz...")
-                
-                if user_input_id:
-                    drive_id_to_use = user_input_id
-            else:
-                drive_id_to_use = VILLAGE_ZIP_ID
+            user_input_id = st.text_input("Paste Google Drive Zip Link:", placeholder="e.g., https://drive.google.com/file/d/...")
             
-            if not drive_id_to_use:
-                st.info("Waiting for File ID...")
+            if not user_input_id:
                 st.stop()
             
             with st.spinner("Downloading & Scanning Village Repository..."):
-                repo_path = get_drive_repo(drive_id_to_use)
+                repo_path = get_drive_repo(user_input_id)
                 
-            if repo_path:
+            if repo_path == "NOT_ZIP":
+                st.error("❌ **Error:** The link you provided seems to be a Folder or an invalid file. Please provide a link to a **.zip** file.")
+                st.stop()
+            elif repo_path:
                 state_files = find_state_files(repo_path)
                 if not state_files:
-                    st.error("No Shapefiles found in the Zip. Did you Zip the folder correctly?")
+                    st.error("No Shapefiles found in the Zip.")
                     st.stop()
                     
                 st.divider()
