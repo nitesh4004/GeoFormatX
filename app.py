@@ -54,8 +54,19 @@ def get_drive_repo(file_id):
     Returns the path to the extracted directory.
     Cached as a resource so we don't redownload large repos.
     """
-    if not file_id or "Replace" in file_id:
+    if not file_id:
         return None
+
+    # Handle full URLs if pasted
+    if "drive.google.com" in file_id:
+        try:
+            # Attempt to extract ID from URL
+            if "/d/" in file_id:
+                file_id = file_id.split("/d/")[1].split("/")[0]
+            elif "id=" in file_id:
+                file_id = file_id.split("id=")[1].split("&")[0]
+        except:
+            pass # Fallback to using the whole string or fail gracefully
 
     url = f'https://drive.google.com/uc?id={file_id}'
     temp_dir = tempfile.mkdtemp()
@@ -67,7 +78,7 @@ def get_drive_repo(file_id):
             zip_ref.extractall(temp_dir)
         return temp_dir
     except Exception as e:
-        st.error(f"Failed to download repository: {e}")
+        st.error(f"Failed to download/extract. Ensure the ID is for a .zip file, not a folder. Error: {e}")
         return None
 
 @st.cache_data(show_spinner=False)
@@ -240,21 +251,38 @@ def view_admin_downloader():
         # --- VILLAGE LOGIC (Multi-File) ---
         if "Villages" in source_type:
             # ---------------------------------------------------------
-            # TODO: USER MUST ZIP THE VILLAGE FOLDER AND PASTE ID HERE
+            # OPTION A: Hardcode ID here (Optional)
             VILLAGE_ZIP_ID = "Please_Replace_With_Your_Zip_File_ID" 
             # ---------------------------------------------------------
             
+            drive_id_to_use = None
+
+            # If the code still has the placeholder, ask the user in the UI
             if "Replace" in VILLAGE_ZIP_ID:
-                st.warning("⚠️ **Setup Required**: Please Zip your 'Village of India' folder, upload it to Drive, and paste the File ID in the code variable `VILLAGE_ZIP_ID`.")
+                st.warning("⚠️ **Setup Required for Villages**")
+                st.markdown("""
+                1. **Zip** your 'Village of India' folder on Google Drive.
+                2. **Get the Link/ID** of that new `.zip` file (Ensure it is 'Anyone with link').
+                3. Paste the **File ID** below.
+                """)
+                user_input_id = st.text_input("Paste Google Drive Zip File ID here:", placeholder="e.g., 1xYz...")
+                
+                if user_input_id:
+                    drive_id_to_use = user_input_id
+            else:
+                drive_id_to_use = VILLAGE_ZIP_ID
+            
+            if not drive_id_to_use:
+                st.info("Waiting for File ID...")
                 st.stop()
             
-            with st.spinner("Accessing Village Repository..."):
-                repo_path = get_drive_repo(VILLAGE_ZIP_ID)
+            with st.spinner("Downloading & Scanning Village Repository..."):
+                repo_path = get_drive_repo(drive_id_to_use)
                 
             if repo_path:
                 state_files = find_state_files(repo_path)
                 if not state_files:
-                    st.error("No Shapefiles found in the Village Zip.")
+                    st.error("No Shapefiles found in the Zip. Did you Zip the folder correctly?")
                     st.stop()
                     
                 st.divider()
