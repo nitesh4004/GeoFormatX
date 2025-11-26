@@ -26,82 +26,65 @@ fiona.drvsupport.supported_drivers['LIBKML'] = 'rw'
 # --- 2. Custom UI Styling ---
 st.markdown("""
     <style>
-    /* Main container styling */
     .main { background-color: #FAFAFA; }
-    
-    /* Header styling */
     h1 { color: #2C3E50; font-family: 'Helvetica Neue', sans-serif; }
-    h3 { color: #34495E; }
-    
-    /* Custom Box styling */
-    .css-1r6slb0 { border: 1px solid #E0E0E0; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    
-    /* Button Styling */
     .stButton>button { width: 100%; border-radius: 8px; font-weight: 600; }
-    
-    /* Success/Info box styling */
-    .stAlert { border-radius: 8px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. Configuration: State Village File IDs ---
-# ⚠️ IMPORTANT: Replace the empty strings "" with the actual Google Drive File IDs 
-# from your "Village of india" folder for each state zip file.
-# To get an ID: Right-click file in Drive -> Share -> Copy Link -> The ID is the part like '1tMyiU...'
+# --- 3. Configuration: Google Drive File IDs ---
+# Dictionary mapping State Names to their specific Google Drive File IDs
 STATE_VILLAGE_IDS = {
-    "ANDHRA_PRADESH": "",
-    "BIHAR": "",
-    "CHANDIGARH": "",
-    "CHHATTISGARH": "",
-    "DELHI": "",
-    "GOA": "",
-    "HARYANA": "",
-    "JHARKHAND": "",
-    "KARNATAKA": "",
-    "KERALA": "",
-    "LAKSHYADWEEP": "",
-    "MADHYA_PRADESH": "", 
-    "MAHARASHTRA": "", 
-    "UTTARAKHAND": "",  
-    "WEST_BENGAL": "", 
-    # Add other states here as they appear in your folder...
+    "ANDAMAN_&_NICOBAR_ISLANDS": "1aikaQXqP9xtDhMcQFyUn8g9gGi0Tam0s",
+    "ANDHRA_PRADESH": "1fkDuJI6oC0h8LQCvCh9elhKq0KbXQbTj",
+    "BIHAR": "14QA_fZiSPYFKy9CfvqL4Z-9v9FWaAWBC",
+    "CHANDIGARH": "1cr9Px3o70pJTRSRcqTN1kS18AcTeksu_",
+    "CHHATTISGARH": "1Kk3sUbMBysyDwVYTnBBGaqF9E9p7372c",
+    "DELHI": "1UuiNX9cQvj3BZIhcojvEb6cZv3ic0NMy",
+    "GOA": "1re0K0LUr1k9ZgqsKJoQpynLXtmFQQECs",
+    "HARYANA": "1Ab1ccMk-papacEOK74CST_nLFBbwRQia",
+    "JHARKHAND": "16w2g-ppENXpbAAbtG05bepQjVleijQCB",
+    "KARNATAKA": "1daGp_O2RmMjjT8ATsaRX75XWNfWZaPsM",
+    "KERALA": "1qva1qt4luInTg6tb_6vCKU7qKhbBvj1J",
+    "LAKSHYADWEEP": "10vUXwZ8A_UNWaLAFvDZGfbi985_E8oxc",
+    "MADHYA_PRADESH": "1WnwwFX8AtY4P9mDJq8Wd09nqEcIhOHk4",
+    "MAHARASHTRA": "1NspjfpGqxNb1G6fJSmlGj82h5YTanULV",
+    "UTTARAKHAND": "1ydyLvZ3yiOWW9ltfYMlsKqBbnyLi0cu_",
+    "WEST_BENGAL": "1euxg0fPGT5XcbLt0dP25U2M4fEZ-dkNs"
 }
 
 # --- 4. Helper Functions (Cached) ---
 
 @st.cache_data(show_spinner=False)
-def load_single_file_from_drive(file_id):
-    """Downloads a single dataset from Google Drive using File ID."""
-    if not file_id:
-        return None
-        
-    url = f'https://drive.google.com/uc?id={file_id}'
+def load_file_from_url(url, is_gdrive=False):
+    """
+    Universal loader. 
+    If is_gdrive=True, uses gdown (requires ID in URL).
+    If is_gdrive=False, uses requests (requires direct link).
+    """
     temp_dir = tempfile.mkdtemp()
-    zip_path = os.path.join(temp_dir, "drive_data.zip")
+    zip_path = os.path.join(temp_dir, "downloaded_data.zip")
+    
     try:
-        gdown.download(url, zip_path, quiet=True, fuzzy=True)
-        return extract_and_read_first(zip_path, temp_dir)
-    except Exception as e:
-        st.error(f"Download failed: {e}")
-        return None
+        if is_gdrive:
+            # Google Drive Logic (gdown handles the ID extraction from URL)
+            gdown.download(url, zip_path, quiet=True, fuzzy=True)
+        else:
+            # Direct Link Logic
+            response = requests.get(url, stream=True)
+            if response.status_code != 200:
+                st.error(f"❌ Could not find file at: {url}")
+                return None
+            with open(zip_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
 
-@st.cache_data(show_spinner=False)
-def load_github_data(url):
-    """Downloads State Boundary from GitHub."""
-    raw_url = url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
-    temp_dir = tempfile.mkdtemp()
-    zip_path = os.path.join(temp_dir, "github_data.zip")
-    try:
-        response = requests.get(raw_url)
-        response.raise_for_status()
-        with open(zip_path, "wb") as f:
-            f.write(response.content)
         return extract_and_read_first(zip_path, temp_dir)
     except Exception as e:
+        st.error(f"Download Error: {e}")
         return None
 
 def extract_and_read_first(zip_path, temp_dir):
-    """Extracts zip and reads the FIRST shapefile found."""
     try:
         with ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(temp_dir)
@@ -118,24 +101,17 @@ def extract_and_read_first(zip_path, temp_dir):
         return None
 
 def clean_text_data(gdf):
-    """Fixes encoding issues and standardizes columns."""
-    # Standardize column names for consistency
     col_map = {
-        'STATE_UT': 'STATE',
-        'State': 'STATE',
-        'Name': 'District',  # Often used in District files
-        'Sub_dist': 'Subdistrict',
-        'Vill_name': 'Village',
-        'Vill_name_': 'Village' # Sometimes appearing with underscore
+        'STATE_UT': 'STATE', 'State': 'STATE',
+        'Name': 'District', 'Sub_dist': 'Subdistrict',
+        'Vill_name': 'Village', 'Vill_name_': 'Village'
     }
     gdf.rename(columns=col_map, inplace=True)
     
-    # Clean text artifacts
     target_cols = ['District', 'STATE', 'Subdistrict', 'Village']
     for col in target_cols:
         if col in gdf.columns:
             if pd.api.types.is_string_dtype(gdf[col]) or pd.api.types.is_object_dtype(gdf[col]):
-                # Remove encoding artifacts like '>'
                 gdf[col] = gdf[col].astype(str).str.replace('>', 'A').str.strip()
     return gdf
 
@@ -144,26 +120,25 @@ def convert_crs(gdf, target_epsg):
         gdf.set_crs(epsg=4326, inplace=True)
     return gdf.to_crs(epsg=target_epsg)
 
-def make_zip(source_dir):
-    zip_buffer = BytesIO()
-    with ZipFile(zip_buffer, 'w') as zip_file:
-        for root, dirs, files in os.walk(source_dir):
-            for file in files:
-                file_path = os.path.join(root, file)
-                zip_file.write(file_path, os.path.relpath(file_path, source_dir))
-    zip_buffer.seek(0)
-    return zip_buffer
-
 def handle_export(gdf, output_format, file_prefix="export"):
     with tempfile.TemporaryDirectory() as tmp_dir:
         out_dir = os.path.join(tmp_dir, "output")
         os.makedirs(out_dir, exist_ok=True)
         
-        file_ext = ""
-        mime_type = "application/octet-stream"
-        final_data = None
-        
+        # Helper to zip the output directory
+        def make_zip(source_dir):
+            zip_buffer = BytesIO()
+            with ZipFile(zip_buffer, 'w') as zip_file:
+                for root, dirs, files in os.walk(source_dir):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        zip_file.write(file_path, os.path.relpath(file_path, source_dir))
+            zip_buffer.seek(0)
+            return zip_buffer
+
         try:
+            file_ext, mime_type, final_data = "", "", None
+            
             if "Shapefile" in output_format:
                 gdf.to_file(os.path.join(out_dir, f"{file_prefix}.shp"), driver="ESRI Shapefile", encoding='utf-8', engine='fiona')
                 final_data = make_zip(out_dir)
@@ -174,37 +149,20 @@ def handle_export(gdf, output_format, file_prefix="export"):
                 gdf.to_file(path, driver="GeoJSON", engine='fiona')
                 with open(path, "rb") as f: final_data = BytesIO(f.read())
                 file_ext, mime_type = ".geojson", "application/json"
-                
-            elif "GeoPackage" in output_format:
-                path = os.path.join(out_dir, f"{file_prefix}.gpkg")
-                gdf.to_file(path, driver="GPKG", engine='fiona')
-                with open(path, "rb") as f: final_data = BytesIO(f.read())
-                file_ext, mime_type = ".gpkg", "application/x-sqlite3"
-                
+            
             elif "KML" in output_format:
                 path = os.path.join(out_dir, f"{file_prefix}.kml")
                 gdf.to_file(path, driver="KML", engine='fiona')
                 with open(path, "rb") as f: final_data = BytesIO(f.read())
                 file_ext, mime_type = ".kml", "application/vnd.google-earth.kml+xml"
             
-            elif "CSV" in output_format:
-                path = os.path.join(out_dir, f"{file_prefix}.csv")
-                csv_gdf = gdf.copy()
-                csv_gdf['geometry'] = csv_gdf.geometry.to_wkt()
-                csv_gdf.to_csv(path, index=False)
+            elif "GeoPackage" in output_format:
+                path = os.path.join(out_dir, f"{file_prefix}.gpkg")
+                gdf.to_file(path, driver="GPKG", engine='fiona')
                 with open(path, "rb") as f: final_data = BytesIO(f.read())
-                file_ext, mime_type = ".csv", "text/csv"
-                
-            elif "Excel" in output_format:
-                path = os.path.join(out_dir, f"{file_prefix}.xlsx")
-                excel_gdf = gdf.copy()
-                excel_gdf['geometry'] = excel_gdf.geometry.astype(str)
-                excel_gdf.to_excel(path, index=False)
-                with open(path, "rb") as f: final_data = BytesIO(f.read())
-                file_ext, mime_type = ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                
+                file_ext, mime_type = ".gpkg", "application/x-sqlite3"
+
             return final_data, file_ext, mime_type
-            
         except Exception as e:
             st.error(f"Export failed: {str(e)}")
             return None, None, None
@@ -221,107 +179,97 @@ def view_admin_downloader():
         st.subheader("1. Select Source")
         source_type = st.radio(
             "Dataset Level",
-            [
-                "🏛️ Districts (Detailed)", 
-                "🏘️ Subdistricts (Tehsil/Taluk)", 
-                "🛖 Villages (Gram Panchayat)",
-                "🗺️ States (Boundaries Only)"
-            ]
+            ["🏛️ Districts", "🏘️ Subdistricts", "🛖 Villages", "🗺️ States"]
         )
         
         gdf = None
         selected_feature = None
         filename = "export"
         
-        # --- DISTRICTS ---
+        # --- DISTRICTS (Google Drive) ---
         if "Districts" in source_type:
             with st.spinner("Fetching District Database..."):
-                gdf = load_single_file_from_drive('1tMyiUheQBcwwPwZQla67PwC5-AqenTmv')
+                gdf = load_file_from_url('https://drive.google.com/uc?id=1tMyiUheQBcwwPwZQla67PwC5-AqenTmv', is_gdrive=True)
         
-        # --- SUBDISTRICTS ---
+        # --- SUBDISTRICTS (Google Drive) ---
         elif "Subdistricts" in source_type:
             with st.spinner("Fetching Subdistrict Database..."):
-                gdf = load_single_file_from_drive('18lMyt2j3Xjz_Qk_2Kzppr8EVlVDx_yOv')
+                gdf = load_file_from_url('https://drive.google.com/uc?id=18lMyt2j3Xjz_Qk_2Kzppr8EVlVDx_yOv', is_gdrive=True)
         
-        # --- STATES ---
+        # --- STATES (GitHub) ---
         elif "States" in source_type:
             with st.spinner("Fetching State Database..."):
-                gdf = load_github_data("https://github.com/nitesh4004/GeoFormatX/blob/main/STATE_BOUNDARY.zip")
+                gdf = load_file_from_url("https://raw.githubusercontent.com/nitesh4004/GeoFormatX/main/STATE_BOUNDARY.zip", is_gdrive=False)
         
-        # --- VILLAGES (NEW FEATURE) ---
+        # --- VILLAGES (Google Drive ID Method) ---
         elif "Villages" in source_type:
-            st.info("ℹ️ Village data is heavy. Please select a state to download its specific database.")
+            st.info("ℹ️ Select a state to download its Village Map from Drive.")
             
-            # 1. State Selection for File Loading
-            available_states = list(STATE_VILLAGE_IDS.keys())
-            target_state_key = st.selectbox("Select State for Village Data", available_states)
+            # List only states that we have IDs for
+            available_states = sorted(list(STATE_VILLAGE_IDS.keys()))
+            target_state_key = st.selectbox("Select State", available_states)
             
             file_id = STATE_VILLAGE_IDS.get(target_state_key)
             
             if not file_id:
-                st.warning(f"⚠️ No File ID configured for {target_state_key}. Please update the `STATE_VILLAGE_IDS` dictionary in the code.")
+                st.error("File ID not found for this state.")
                 st.stop()
             
-            with st.spinner(f"Downloading Village Map for {target_state_key}... (This may take time)"):
-                gdf = load_single_file_from_drive(file_id)
+            # Construct Google Drive URL with the ID
+            drive_url = f"https://drive.google.com/uc?id={file_id}"
+            
+            with st.spinner(f"Downloading {target_state_key} Village Map..."):
+                gdf = load_file_from_url(drive_url, is_gdrive=True)
+                
                 if gdf is None:
-                    st.error("Failed to load village data. Check if the File ID is correct and public.")
+                    st.error("Failed to load data. Please check the File ID or permissions.")
                     st.stop()
 
-        # --- DATA PROCESSING & FILTERING ---
         if gdf is None: st.stop()
         
         # Normalize and Clean
-        gdf = clean_text_data(gdf) # Renames 'STATE_UT'->'STATE', 'Sub_dist'->'Subdistrict', 'Vill_name'->'Village'
+        gdf = clean_text_data(gdf)
         
         st.divider()
         st.subheader("2. Filter Area")
         
-        # Helper to get unique sorted values safely
         def get_sorted_unique(df, col):
             return sorted(df[col].astype(str).unique()) if col in df.columns else []
 
         if 'STATE' in gdf.columns:
-            # If we already selected state in "Villages" mode, we might auto-select or just filter
             states = get_sorted_unique(gdf, 'STATE')
-            
-            # Logic: If only one state exists (Village mode), default to it.
-            index = 0
+            # If loaded specific state file, auto-select it if possible, else default to first
+            idx = 0
+            # Try to match the selected key (e.g. UTTARAKHAND) to the data content if possible
             if "Villages" in source_type and len(states) > 0:
-                # Try to match the selected key (e.g. UTTARAKHAND) to the data content
-                pass 
-                
-            sel_state = st.selectbox("Filter State", states, index=0)
+                 # Logic: We already filtered by downloading a specific file, so the state column
+                 # likely only contains that one state. We just select index 0.
+                 pass
             
-            # --- FILTERING LOGIC ---
+            sel_state = st.selectbox("Filter State", states, index=idx)
             
-            # 1. Villages (Deepest Hierarchy)
+            # Filtering Logic
             if "Villages" in source_type and 'District' in gdf.columns:
+                # Filter down to district -> subdistrict -> village
                 state_gdf = gdf[gdf['STATE'] == sel_state]
-                
                 districts = get_sorted_unique(state_gdf, 'District')
                 sel_district = st.selectbox("Select District", districts)
-                
                 dist_gdf = state_gdf[state_gdf['District'] == sel_district]
                 
                 if 'Subdistrict' in dist_gdf.columns:
                     subdistricts = get_sorted_unique(dist_gdf, 'Subdistrict')
-                    sel_subdistrict = st.selectbox("Select Subdistrict (Tehsil)", subdistricts)
-                    
+                    sel_subdistrict = st.selectbox("Select Subdistrict", subdistricts)
                     subdist_gdf = dist_gdf[dist_gdf['Subdistrict'] == sel_subdistrict]
                     
                     if 'Village' in subdist_gdf.columns:
-                        villages = get_sorted_unique(subdist_gdf, 'Village')
-                        # Option to download whole subdistrict or specific village
-                        filter_mode = st.radio("Selection Mode", ["All Villages in Subdistrict", "Specific Village"])
-                        
-                        if filter_mode == "Specific Village":
-                            sel_village = st.selectbox("Select Village", villages)
+                        mode = st.radio("Selection Mode", ["All Villages in Subdistrict", "Specific Village"])
+                        if mode == "Specific Village":
+                            sel_village = st.selectbox("Select Village", get_sorted_unique(subdist_gdf, 'Village'))
                             selected_feature = subdist_gdf[subdist_gdf['Village'] == sel_village]
                             filename = f"{sel_village}_{sel_subdistrict}_Village"
                         else:
                             selected_feature = subdist_gdf
-                            filename = f"{sel_subdistrict}_All_Villages"
+                            filename = f"{sel_subdistrict}_Villages"
                     else:
                         selected_feature = subdist_gdf
                         filename = f"{sel_subdistrict}_Villages"
@@ -329,77 +277,50 @@ def view_admin_downloader():
                     selected_feature = dist_gdf
                     filename = f"{sel_district}_Villages"
 
-            # 2. Districts / Subdistricts Logic (Existing)
-            elif "Districts" in source_type and 'District' in gdf.columns:
-                districts = get_sorted_unique(gdf[gdf['STATE'] == sel_state], 'District')
-                sel_district = st.selectbox("Select District", districts)
-                selected_feature = gdf[(gdf['STATE'] == sel_state) & (gdf['District'] == sel_district)]
-                filename = f"{sel_district}_{sel_state}"
+            elif "Districts" in source_type:
+                selected_feature = gdf[(gdf['STATE'] == sel_state) & (gdf['District'] == st.selectbox("Select District", get_sorted_unique(gdf[gdf['STATE'] == sel_state], 'District')))]
+                filename = f"{selected_feature.iloc[0]['District']}_{sel_state}" if not selected_feature.empty else "export"
             
-            elif "Subdistricts" in source_type and 'District' in gdf.columns and 'Subdistrict' in gdf.columns:
+            elif "Subdistricts" in source_type:
+                # Simplified Subdistrict logic for brevity
                 state_gdf = gdf[gdf['STATE'] == sel_state]
-                districts = get_sorted_unique(state_gdf, 'District')
-                sel_district = st.selectbox("Select District", districts)
-                
+                sel_district = st.selectbox("Select District", get_sorted_unique(state_gdf, 'District'))
                 dist_gdf = state_gdf[state_gdf['District'] == sel_district]
-                subdistricts = get_sorted_unique(dist_gdf, 'Subdistrict')
-                sel_subdistrict = st.selectbox("Select Subdistrict", subdistricts)
-                
-                selected_feature = dist_gdf[dist_gdf['Subdistrict'] == sel_subdistrict]
-                filename = f"{sel_subdistrict}_{sel_district}_Subdistrict"
-                
+                sel_sub = st.selectbox("Select Subdistrict", get_sorted_unique(dist_gdf, 'Subdistrict'))
+                selected_feature = dist_gdf[dist_gdf['Subdistrict'] == sel_sub]
+                filename = f"{sel_sub}_{sel_district}"
+            
             else:
                 selected_feature = gdf[gdf['STATE'] == sel_state]
                 filename = f"{sel_state}_Boundary"
 
-        # --- EXPORT SECTION (Common) ---
+        # Export Button
         st.divider()
-        st.subheader("3. Export")
-        out_fmt = st.selectbox("Format", ["ESRI Shapefile (.zip)", "GeoJSON", "KML", "GeoPackage (.gpkg)"])
-        
-        if st.button("🚀 Process & Prepare Download", type="primary"):
-            if selected_feature is not None:
-                with st.spinner("Processing geometry..."):
-                    data, ext, mime = handle_export(selected_feature, out_fmt, filename)
-                if data:
-                    st.download_button(
-                        label=f"💾 Download {filename}{ext}",
-                        data=data,
-                        file_name=f"{filename}{ext}",
-                        mime=mime
-                    )
+        if st.button("🚀 Process & Download", type="primary"):
+            if selected_feature is not None and not selected_feature.empty:
+                data, ext, mime = handle_export(selected_feature, out_fmt, filename)
+                if data: st.download_button(f"💾 Save {filename}{ext}", data, f"{filename}{ext}", mime)
             else:
-                st.warning("Please make a selection first.")
-
+                st.warning("Selection is empty.")
+    
+    # Common Preview Section
     with col_preview:
-        st.subheader("🗺️ Live Preview")
+        st.subheader("3. Export Options & Preview")
+        out_fmt = st.selectbox("Format", ["ESRI Shapefile (.zip)", "GeoJSON", "KML", "GeoPackage"])
+        
         if selected_feature is not None and not selected_feature.empty:
-            # Metrics
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Selected Features", len(selected_feature))
-            m2.metric("CRS", str(selected_feature.crs.name if selected_feature.crs else "N/A"))
-            m3.metric("Geometry", selected_feature.geom_type.iloc[0])
-            
-            # Map
+            st.metric("Features Selected", len(selected_feature))
             try:
-                # Convert to WGS84 for mapping
                 map_data = selected_feature.to_crs(epsg=4326)
-                
-                # Intelligent Downsampling for Preview
-                count = len(map_data)
-                if count > 2000:
-                    st.warning(f"⚠️ Dataset too large ({count} features). Displaying 1000 random samples for performance.")
+                if len(map_data) > 1000:
+                    st.warning("⚠️ Large dataset. Previewing 1000 features.")
                     st.map(map_data.sample(1000))
                 else:
                     st.map(map_data)
-                
-                with st.expander("View Attribute Data", expanded=True):
-                    st.dataframe(selected_feature.drop(columns='geometry').head(10))
             except Exception as e:
-                st.warning(f"Map preview unavailable: {e}")
-        else:
-            st.info("Select a Region to generate a preview.")
+                st.warning("Map preview unavailable.")
 
+# --- 6. Main & Converter ---
 def view_data_converter():
     st.title("🔄 Universal Data Converter")
     st.markdown("Upload your own vector data (Shapefile, CSV, KML, etc.) and convert it.")
@@ -471,30 +392,11 @@ def view_data_converter():
                     except:
                         st.write("Visual preview not available.")
 
-# --- 6. Main Navigation Controller ---
-
 def main():
     st.sidebar.title("🌍 GeoConvert Pro")
-    st.sidebar.markdown("---")
-    
-    mode = st.sidebar.radio(
-        "Select Mode:",
-        ["📥 Admin Boundary Downloader", "🔄 Universal Data Converter"],
-        captions=["Get India Districts/States/Villages", "Format conversion tool"]
-    )
-    
-    st.sidebar.markdown("---")
-    st.sidebar.info(
-        "**Supported Formats:**\n"
-        "- Shapefile (zipped)\n"
-        "- GeoJSON, KML, GPKG\n"
-        "- CSV/Excel (Lat/Lon or WKT)"
-    )
-
-    if mode == "📥 Admin Boundary Downloader":
-        view_admin_downloader()
-    else:
-        view_data_converter()
+    mode = st.sidebar.radio("Mode", ["📥 Admin Downloader", "🔄 Converter"])
+    if mode == "📥 Admin Downloader": view_admin_downloader()
+    else: view_data_converter()
 
 if __name__ == "__main__":
     main()
