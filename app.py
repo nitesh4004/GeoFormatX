@@ -12,7 +12,7 @@ from shapely import wkt
 
 # --- 1. Configuration & Page Setup ---
 st.set_page_config(
-    page_title="GeoConvert Pro",
+    page_title="geoformatx",
     page_icon="🌍",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -422,3 +422,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
