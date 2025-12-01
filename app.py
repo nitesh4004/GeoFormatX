@@ -410,7 +410,7 @@ def view_data_converter():
 
 def main():
     with st.sidebar:
-        st.title("GeoConvert Pro")
+        st.title("geoFormatX")
         mode = st.radio("Mode", ["📥 Admin Downloader", "🔄 Converter"])
         st.divider()
         st.caption("v2.1 | Theme Aware")
@@ -422,4 +422,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
