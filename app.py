@@ -15,439 +15,245 @@ st.set_page_config(
     page_title="GeoFormatX Ultimate",
     page_icon="🌍",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
-# Enable KML drivers for fiona
+# Enable KML drivers
 fiona.drvsupport.supported_drivers['KML'] = 'rw'
 fiona.drvsupport.supported_drivers['LIBKML'] = 'rw'
 
-# Initialize Session State
+# Session State
 if 'calc_result_gdf' not in st.session_state:
     st.session_state['calc_result_gdf'] = None
 if 'calc_result_name' not in st.session_state:
     st.session_state['calc_result_name'] = "result"
-if 'current_tab' not in st.session_state:
-    st.session_state['current_tab'] = "home"
 
-# --- 2. ENHANCED STYLING (Modern + Primary Blue #0068C9) ---
+# --- 2. CLEAN MINIMALIST STYLING (Card-based with Accent Blue) ---
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap');
 
-    * {
-        font-family: 'Inter', sans-serif;
+    html, body, [class*="css"] {
+        font-family: 'Outfit', sans-serif;
     }
 
     code, pre {
-        font-family: 'JetBrains Mono', monospace;
+        font-family: 'Space Mono', monospace;
     }
 
-    /* ROOT VARIABLES */
-    :root {
-        --primary: #0068C9;
-        --primary-dark: #0053a6;
-        --primary-light: #E8F0FF;
-        --secondary: #F5F5F5;
-        --border: #E0E0E0;
-        --text-primary: #1a1a1a;
-        --text-secondary: #666666;
-        --success: #10B981;
-        --warning: #F59E0B;
-        --error: #EF4444;
+    /* === MINIMALIST CARD STYLING === */
+    .minimal-card {
+        background: #FFFFFF;
+        border: none;
+        border-left: 4px solid #0068C9;
+        border-radius: 4px;
+        padding: 1.25rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        transition: all 0.2s ease;
+    }
+
+    .minimal-card:hover {
+        box-shadow: 0 4px 12px rgba(0,104,201,0.15);
+    }
+
+    .minimal-card h2, .minimal-card h3 {
+        margin-top: 0;
+        color: #1a1a1a;
+        font-weight: 600;
+        letter-spacing: -0.3px;
+    }
+
+    .minimal-card p {
+        color: #555555;
+        line-height: 1.6;
+        margin: 0.5rem 0;
     }
 
     @media (prefers-color-scheme: dark) {
-        :root {
-            --secondary: #1E1E1E;
-            --border: #3a3a3a;
-            --text-primary: #ffffff;
-            --text-secondary: #b0b0b0;
+        .minimal-card {
+            background: #1E1E1E;
+            border-left-color: #0068C9;
+        }
+        .minimal-card h2, .minimal-card h3 {
+            color: #FFFFFF;
+        }
+        .minimal-card p {
+            color: #CCCCCC;
         }
     }
 
-    /* HERO SECTION */
-    .hero-banner {
-        background: linear-gradient(135deg, #0068C9 0%, #0053a6 100%);
-        padding: 2.5rem;
-        border-radius: 12px;
-        color: white;
-        margin-bottom: 2rem;
-        box-shadow: 0 4px 15px rgba(0, 104, 201, 0.15);
+    /* === SECTION DIVIDER === */
+    .section-break {
+        height: 1px;
+        background: linear-gradient(90deg, transparent, #0068C9, transparent);
+        margin: 2rem 0;
+        opacity: 0.3;
     }
 
-    .hero-banner h1 {
-        margin: 0;
-        font-size: 2.5rem;
+    /* === SIDEBAR STYLING === */
+    .sidebar-title {
+        font-size: 1.3rem;
         font-weight: 700;
+        color: #0068C9;
+        margin-bottom: 0.5rem;
         letter-spacing: -0.5px;
     }
 
-    .hero-banner p {
-        margin: 0.5rem 0 0 0;
-        font-size: 1rem;
-        opacity: 0.95;
-    }
-
-    /* FEATURE CARDS */
-    .feature-card {
-        background: #ffffff;
-        border: 1px solid #E0E0E0;
-        border-radius: 12px;
-        padding: 1.5rem;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        cursor: pointer;
-        position: relative;
-        overflow: hidden;
-    }
-
-    .feature-card:hover {
-        border-color: #0068C9;
-        box-shadow: 0 8px 24px rgba(0, 104, 201, 0.12);
-        transform: translateY(-2px);
-    }
-
-    .feature-card::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 4px;
-        background: linear-gradient(90deg, #0068C9, #0053a6);
-        transform: scaleX(0);
-        transform-origin: left;
-        transition: transform 0.3s ease;
-    }
-
-    .feature-card:hover::before {
-        transform: scaleX(1);
-    }
-
-    .feature-card h3 {
-        margin: 0 0 0.5rem 0;
-        color: #0068C9;
-        font-size: 1.25rem;
-        font-weight: 600;
-    }
-
-    .feature-card p {
-        margin: 0;
-        color: #666666;
-        font-size: 0.95rem;
-        line-height: 1.5;
-    }
-
-    .feature-icon {
-        font-size: 2.5rem;
-        margin-bottom: 0.75rem;
-        display: block;
-    }
-
-    @media (prefers-color-scheme: dark) {
-        .feature-card {
-            background: #262730;
-            border-color: #41424b;
-        }
-
-        .feature-card p {
-            color: #b0b0b0;
-        }
-    }
-
-    /* WORKFLOW INDICATOR */
-    .workflow-steps {
-        display: flex;
-        align-items: center;
-        margin: 2rem 0;
-        gap: 0.5rem;
-        flex-wrap: wrap;
-    }
-
-    .step {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.5rem 1rem;
-        background: #F5F5F5;
-        border-radius: 20px;
-        font-size: 0.9rem;
-        font-weight: 500;
-        color: #0068C9;
-    }
-
-    .step-number {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 24px;
-        height: 24px;
-        background: #0068C9;
-        color: white;
-        border-radius: 50%;
-        font-weight: 600;
+    .sidebar-subtitle {
         font-size: 0.85rem;
-    }
-
-    .step-arrow {
-        color: #0068C9;
-        font-weight: bold;
-        margin: 0 0.25rem;
-    }
-
-    @media (max-width: 768px) {
-        .step-arrow {
-            display: none;
-        }
-    }
-
-    @media (prefers-color-scheme: dark) {
-        .step {
-            background: #3a3a3a;
-        }
-    }
-
-    /* CONTROL PANEL */
-    .control-panel {
-        background: #ffffff;
-        border: 1px solid #E0E0E0;
-        border-radius: 12px;
-        padding: 1.5rem;
+        color: #999999;
         margin-bottom: 1.5rem;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        font-weight: 400;
     }
 
-    .control-panel-header {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        margin-bottom: 1rem;
+    .sidebar-section {
+        margin-bottom: 1.5rem;
         padding-bottom: 1rem;
-        border-bottom: 1px solid #E0E0E0;
+        border-bottom: 1px solid rgba(0,104,201,0.1);
     }
 
-    .control-panel-header h3 {
-        margin: 0;
-        font-size: 1.1rem;
-        font-weight: 600;
-        color: #1a1a1a;
+    .sidebar-section:last-child {
+        border-bottom: none;
     }
 
-    .control-panel-header .icon {
-        font-size: 1.5rem;
-    }
-
-    @media (prefers-color-scheme: dark) {
-        .control-panel {
-            background: #262730;
-            border-color: #41424b;
-        }
-
-        .control-panel-header {
-            border-bottom-color: #41424b;
-        }
-
-        .control-panel-header h3 {
-            color: #ffffff;
-        }
-    }
-
-    /* STATS DISPLAY */
-    .stats-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 1rem;
-        margin: 1rem 0;
-    }
-
-    .stat-box {
-        background: linear-gradient(135deg, #E8F0FF 0%, #F0F4FF 100%);
-        border: 1px solid #D4E4F7;
-        border-radius: 8px;
-        padding: 1rem;
-        text-align: center;
-    }
-
-    .stat-box .value {
-        font-size: 1.75rem;
-        font-weight: 700;
-        color: #0068C9;
-        margin-bottom: 0.25rem;
-    }
-
-    .stat-box .label {
-        font-size: 0.85rem;
-        color: #666666;
-        font-weight: 500;
-    }
-
-    @media (prefers-color-scheme: dark) {
-        .stat-box {
-            background: linear-gradient(135deg, #1a2a4a 0%, #1e2f50 100%);
-            border-color: #2a4a6a;
-        }
-
-        .stat-box .label {
-            color: #b0b0b0;
-        }
-    }
-
-    /* BUTTONS */
+    /* === BUTTON STYLING === */
     .stButton > button {
-        border-radius: 8px;
-        font-weight: 600;
-        letter-spacing: 0.3px;
-        transition: all 0.2s ease;
-        border: none;
-        padding: 0.6rem 1.25rem;
-        height: auto;
-    }
-
-    .stButton > button[kind="primary"] {
         background-color: #0068C9;
         color: white;
+        border: none;
+        border-radius: 4px;
+        font-weight: 600;
+        padding: 0.6rem 1.2rem;
+        transition: all 0.2s ease;
+        letter-spacing: 0.2px;
     }
 
-    .stButton > button[kind="primary"]:hover {
+    .stButton > button:hover {
         background-color: #0053a6;
-        box-shadow: 0 4px 12px rgba(0, 104, 201, 0.3);
+        box-shadow: 0 4px 12px rgba(0,104,201,0.25);
         transform: translateY(-1px);
     }
 
-    .stButton > button[kind="secondary"] {
-        background-color: #F5F5F5;
-        color: #1a1a1a;
-        border: 1px solid #E0E0E0;
-    }
-
-    .stButton > button[kind="secondary"]:hover {
-        background-color: #EEEEEE;
-        border-color: #0068C9;
-    }
-
-    /* INPUTS & SELECTS */
+    /* === INPUT STYLING === */
     .stTextInput > div > div > input,
     .stSelectbox > div > div > div,
-    .stNumberInput > div > div > input,
-    .stTextArea > div > div > textarea {
-        border-radius: 8px;
-        border: 1px solid #E0E0E0;
-        font-family: 'Inter', sans-serif;
-        transition: all 0.2s ease;
+    .stNumberInput > div > div > input {
+        border: 1px solid #DDDDDD;
+        border-radius: 4px;
+        padding: 0.6rem 0.8rem;
+        font-family: 'Outfit', sans-serif;
     }
 
     .stTextInput > div > div > input:focus,
     .stSelectbox > div > div > div:focus,
-    .stNumberInput > div > div > input:focus,
-    .stTextArea > div > div > textarea:focus {
+    .stNumberInput > div > div > input:focus {
         border-color: #0068C9;
-        box-shadow: 0 0 0 3px rgba(0, 104, 201, 0.1);
+        box-shadow: 0 0 0 2px rgba(0,104,201,0.1);
     }
 
-    /* TABS - Modern Design */
+    /* === METRIC STYLING === */
+    .metric-item {
+        display: inline-block;
+        padding: 0.75rem 1.5rem;
+        background: #F5F7FA;
+        border-radius: 4px;
+        margin-right: 1rem;
+        margin-bottom: 0.5rem;
+        border-left: 3px solid #0068C9;
+    }
+
+    .metric-label {
+        font-size: 0.8rem;
+        color: #0068C9;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .metric-value {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #1a1a1a;
+    }
+
+    @media (prefers-color-scheme: dark) {
+        .metric-item {
+            background: #2a2a2a;
+        }
+        .metric-value {
+            color: #FFFFFF;
+        }
+    }
+
+    /* === TABS (Minimal) === */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 0.5rem;
-        background: transparent;
-        border-bottom: 2px solid #E0E0E0;
+        gap: 0;
+        border-bottom: 2px solid #EEEEEE;
     }
 
     .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        padding: 0.75rem 1.5rem;
-        border-radius: 0;
         border-bottom: 3px solid transparent;
-        background: transparent;
-        color: #666666;
+        border-radius: 0;
+        padding: 1rem 1.5rem;
         font-weight: 500;
-        transition: all 0.2s ease;
-    }
-
-    .stTabs [data-baseweb="tab"]:hover {
-        color: #0068C9;
-        background: #F5F5F5;
+        color: #999999;
     }
 
     .stTabs [aria-selected="true"] {
-        color: #0068C9;
         border-bottom-color: #0068C9;
-        background: transparent;
+        color: #0068C9;
     }
 
-    @media (prefers-color-scheme: dark) {
-        .stTabs [data-baseweb="tab-list"] {
-            border-bottom-color: #41424b;
-        }
-
-        .stTabs [data-baseweb="tab"]:hover {
-            background: #3a3a3a;
-        }
+    /* === ALERTS === */
+    .stSuccess, .stWarning, .stError, .stInfo {
+        border-radius: 4px;
+        border-left: 4px solid;
     }
 
-    /* ALERTS */
     .stSuccess {
-        background-color: #F0FDF4;
-        border-color: #10B981;
-        border-radius: 8px;
+        border-left-color: #10B981;
     }
 
     .stWarning {
-        background-color: #FFFBEB;
-        border-color: #F59E0B;
-        border-radius: 8px;
+        border-left-color: #F59E0B;
     }
 
     .stError {
-        background-color: #FEF2F2;
-        border-color: #EF4444;
-        border-radius: 8px;
+        border-left-color: #EF4444;
     }
 
     .stInfo {
-        background-color: #E8F0FF;
-        border-color: #0068C9;
-        border-radius: 8px;
+        border-left-color: #0068C9;
     }
 
-    /* DIVIDER */
-    .stDivider {
-        border-color: #E0E0E0;
+    /* === EXPANDER === */
+    .streamlit-expanderHeader {
+        border-left: 3px solid #0068C9;
+        padding-left: 0.75rem;
     }
 
-    /* DATAFRAME */
-    .stDataFrame {
-        border-radius: 8px;
-        overflow: hidden;
+    /* === COLUMNS PADDING === */
+    [data-testid="column"] {
+        padding: 0 0.5rem;
     }
 
-    /* SIDEBAR */
-    .st-emotion-cache-1r6zmc3 {
-        background: linear-gradient(180deg, #ffffff 0%, #F9FAFB 100%);
+    /* === HEADER STYLING === */
+    h1 {
+        color: #1a1a1a;
+        border-bottom: 3px solid #0068C9;
+        padding-bottom: 0.75rem;
     }
 
     @media (prefers-color-scheme: dark) {
-        .st-emotion-cache-1r6zmc3 {
-            background: linear-gradient(180deg, #262730 0%, #1E1E1E 100%);
-        }
-    }
-
-    /* RESPONSIVE */
-    @media (max-width: 768px) {
-        .hero-banner {
-            padding: 1.5rem;
-        }
-
-        .hero-banner h1 {
-            font-size: 1.75rem;
-        }
-
-        .feature-card {
-            padding: 1rem;
+        h1 {
+            color: #FFFFFF;
         }
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. DATA CONSTANTS ---
+# --- 3. DATA CONSTANTS (Complete) ---
 STATE_VILLAGE_IDS = {
     "ANDAMAN_&_NICOBAR_ISLANDS": "1aikaQXqP9xtDhMcQFyUn8g9gGi0Tam0s",
     "ANDHRA_PRADESH": "1fkDuJI6oC0h8LQCvCh9elhKq0KbXQbTj",
@@ -585,118 +391,31 @@ def handle_export(gdf, output_format, file_prefix="export"):
             st.error(f"Export failed: {str(e)}")
             return None, None, None
 
-# --- 5. HOME PAGE ---
-
-def view_home():
-    # Hero Section
-    st.markdown("""
-    <div class="hero-banner">
-        <h1>🌍 GeoFormatX Ultimate</h1>
-        <p>Advanced Geospatial Data Processing & Format Conversion Platform</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Workflow Steps
-    st.markdown("""
-    <div class="workflow-steps">
-        <div class="step"><span class="step-number">1</span> Upload/Download</div>
-        <div class="step-arrow">→</div>
-        <div class="step"><span class="step-number">2</span> Process</div>
-        <div class="step-arrow">→</div>
-        <div class="step"><span class="step-number">3</span> Export</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Feature Cards
-    st.write("")
-    col1, col2, col3 = st.columns(3, gap="medium")
-
-    with col1:
-        st.markdown("""
-        <div class="feature-card">
-            <span class="feature-icon">📥</span>
-            <h3>Admin Downloader</h3>
-            <p>Download official Indian administrative boundaries at district, subdistrict, and village level from verified sources.</p>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button("Explore →", key="home_btn_1", use_container_width=True):
-            st.session_state.current_tab = "downloader"
-            st.rerun()
-
-    with col2:
-        st.markdown("""
-        <div class="feature-card">
-            <span class="feature-icon">🔄</span>
-            <h3>Format Converter</h3>
-            <p>Convert between Shapefile, GeoJSON, KML, GeoPackage with CRS transformation and batch processing support.</p>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button("Convert →", key="home_btn_2", use_container_width=True):
-            st.session_state.current_tab = "converter"
-            st.rerun()
-
-    with col3:
-        st.markdown("""
-        <div class="feature-card">
-            <span class="feature-icon">🧮</span>
-            <h3>Vector Calculator</h3>
-            <p>Perform geoprocessing operations: buffer, dissolve, centroids, simplify, and spatial analysis tools.</p>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button("Calculate →", key="home_btn_3", use_container_width=True):
-            st.session_state.current_tab = "calculator"
-            st.rerun()
-
-    # Additional Info
-    st.divider()
-
-    col_info1, col_info2 = st.columns(2, gap="medium")
-
-    with col_info1:
-        st.markdown("""
-        #### 🚀 Quick Start
-        1. **Admin Downloader** - Fetch state & district boundaries
-        2. **Format Converter** - Convert any vector format
-        3. **Vector Calculator** - Perform spatial analysis
-
-        All tools support multiple output formats and CRS transformations.
-        """)
-
-    with col_info2:
-        st.markdown("""
-        #### ⚡ Supported Formats
-        - **Input**: Shapefile, GeoJSON, KML, GeoPackage, CSV, Excel
-        - **Output**: Shapefile, GeoJSON, KML, GeoPackage
-        - **CRS**: Any EPSG code supported
-
-        Learn more about geospatial formats and coordinate systems.
-        """)
-
-# --- 6. MODULES ---
+# --- 5. MODULES ---
 
 def view_admin_downloader():
-    st.title("📥 Admin Boundary Repository")
-    st.markdown("Download official administrative boundaries for India")
+    st.title("📥 Administrative Boundaries Downloader")
 
-    col_config, col_preview = st.columns([1.2, 1.5], gap="large")
+    st.markdown("""
+    <div class="minimal-card">
+        <p>Download official administrative boundaries for India at multiple granularity levels. 
+        Select your desired level, filter by state/district, and download in your preferred format.</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    with col_config:
-        # Control Panel
-        st.markdown("""
-        <div class="control-panel">
-            <div class="control-panel-header">
-                <span class="icon">⚙️</span>
-                <h3>Configuration</h3>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    col_left, col_right = st.columns([1.3, 1.7], gap="large")
+
+    with col_left:
+        st.markdown('<div class="minimal-card"><h3>Configuration</h3>', unsafe_allow_html=True)
 
         source_type = st.pills(
-            "Granularity",
+            "Data Granularity",
             ["🏛️ Districts", "🏘️ Subdistricts", "🛖 Villages", "🗺️ States"],
             default="🏛️ Districts",
             selection_mode="single"
         )
+
+        st.markdown("</div>", unsafe_allow_html=True)
 
         gdf = None
         selected_feature = None
@@ -704,54 +423,45 @@ def view_admin_downloader():
 
         try:
             if "Districts" in source_type:
-                with st.spinner("⏳ Loading Districts..."):
+                with st.spinner("Loading Districts..."):
                     gdf = load_file_from_url('https://drive.google.com/uc?id=1tMyiUheQBcwwPwZQla67PwC5-AqenTmv', True)
             elif "Subdistricts" in source_type:
-                with st.spinner("⏳ Loading Subdistricts..."):
+                with st.spinner("Loading Subdistricts..."):
                     gdf = load_file_from_url('https://drive.google.com/uc?id=18lMyt2j3Xjz_Qk_2Kzppr8EVlVDx_yOv', True)
             elif "States" in source_type:
-                with st.spinner("⏳ Loading States..."):
+                with st.spinner("Loading States..."):
                     gdf = load_file_from_url("https://raw.githubusercontent.com/nitesh4004/GeoFormatX/main/STATE_BOUNDARY.zip", False)
             elif "Villages" in source_type:
                 available_states = sorted(list(STATE_VILLAGE_IDS.keys()))
                 target_state_key = st.selectbox("Select State", available_states)
                 file_id = STATE_VILLAGE_IDS.get(target_state_key)
                 if file_id and "Placeholder" not in file_id:
-                    with st.spinner(f"⏳ Downloading {target_state_key} Villages..."):
+                    with st.spinner(f"Downloading {target_state_key} Village Map..."):
                         gdf = load_file_from_url(f"https://drive.google.com/uc?id={file_id}", True)
                 else:
-                    st.warning("⚠️ Data for this state is currently unavailable.")
+                    st.warning("Data for this state is currently offline.")
         except Exception:
-            st.error("❌ Connection error. Please try again.")
+            st.error("Connection error. Please try again.")
 
         if gdf is not None:
             gdf = clean_text_data(gdf)
 
-            st.divider()
-
-            st.markdown("""
-            <div class="control-panel">
-                <div class="control-panel-header">
-                    <span class="icon">🔍</span>
-                    <h3>Filter & Select</h3>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown('<div class="minimal-card"><h3>Filter Region</h3>', unsafe_allow_html=True)
 
             def get_sorted_unique(df, col):
                 return sorted(df[col].astype(str).unique()) if col in df.columns else []
 
             if 'STATE' in gdf.columns:
                 states = get_sorted_unique(gdf, 'STATE')
-                sel_state = st.selectbox("Select State", states)
+                sel_state = st.selectbox("State", states, label_visibility="collapsed")
 
                 if "Villages" in source_type and 'District' in gdf.columns:
                     state_gdf = gdf[gdf['STATE'] == sel_state]
-                    sel_district = st.selectbox("Select District", get_sorted_unique(state_gdf, 'District'))
+                    sel_district = st.selectbox("District", get_sorted_unique(state_gdf, 'District'), label_visibility="collapsed")
                     dist_gdf = state_gdf[state_gdf['District'] == sel_district]
 
                     if 'Subdistrict' in dist_gdf.columns:
-                        sel_subdistrict = st.selectbox("Select Subdistrict", get_sorted_unique(dist_gdf, 'Subdistrict'))
+                        sel_subdistrict = st.selectbox("Subdistrict", get_sorted_unique(dist_gdf, 'Subdistrict'), label_visibility="collapsed")
                         subdist_gdf = dist_gdf[dist_gdf['Subdistrict'] == sel_subdistrict]
                         selected_feature = subdist_gdf
                         filename = f"{sel_subdistrict}_Villages"
@@ -761,15 +471,15 @@ def view_admin_downloader():
 
                 elif "Districts" in source_type:
                     state_gdf = gdf[gdf['STATE'] == sel_state]
-                    sel_dist = st.selectbox("Select District", get_sorted_unique(state_gdf, 'District'))
+                    sel_dist = st.selectbox("District", get_sorted_unique(state_gdf, 'District'), label_visibility="collapsed")
                     selected_feature = state_gdf[state_gdf['District'] == sel_dist]
                     filename = f"{sel_dist}_{sel_state}"
 
                 elif "Subdistricts" in source_type:
                     state_gdf = gdf[gdf['STATE'] == sel_state]
-                    sel_district = st.selectbox("Select District", get_sorted_unique(state_gdf, 'District'))
+                    sel_district = st.selectbox("District", get_sorted_unique(state_gdf, 'District'), label_visibility="collapsed")
                     dist_gdf = state_gdf[state_gdf['District'] == sel_district]
-                    sel_sub = st.selectbox("Select Subdistrict", get_sorted_unique(dist_gdf, 'Subdistrict'))
+                    sel_sub = st.selectbox("Subdistrict", get_sorted_unique(dist_gdf, 'Subdistrict'), label_visibility="collapsed")
                     selected_feature = dist_gdf[dist_gdf['Subdistrict'] == sel_sub]
                     filename = f"{sel_sub}_{sel_district}"
 
@@ -777,87 +487,77 @@ def view_admin_downloader():
                     selected_feature = gdf[gdf['STATE'] == sel_state]
                     filename = f"{sel_state}_Boundary"
 
-            st.divider()
+            st.markdown("</div>", unsafe_allow_html=True)
 
-            st.markdown("""
-            <div class="control-panel">
-                <div class="control-panel-header">
-                    <span class="icon">💾</span>
-                    <h3>Export</h3>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown('<div class="minimal-card"><h3>Export Settings</h3>', unsafe_allow_html=True)
 
-            out_fmt = st.selectbox("Output Format", ["ESRI Shapefile (.zip)", "GeoJSON", "KML", "GeoPackage"])
+            col1, col2 = st.columns(2)
+            with col1:
+                out_fmt = st.selectbox("Format", ["ESRI Shapefile (.zip)", "GeoJSON", "KML", "GeoPackage"], label_visibility="collapsed")
+            with col2:
+                if st.button("Download", type="primary", use_container_width=True):
+                    if selected_feature is not None and not selected_feature.empty:
+                        with st.spinner("Packaging data..."):
+                            data, ext, mime = handle_export(selected_feature, out_fmt, filename)
+                            if data:
+                                st.download_button(
+                                    f"Save {filename}{ext}",
+                                    data,
+                                    f"{filename}{ext}",
+                                    mime,
+                                    use_container_width=True
+                                )
+            st.markdown("</div>", unsafe_allow_html=True)
 
-            if st.button("🚀 Download Data", type="primary", use_container_width=True):
-                if selected_feature is not None and not selected_feature.empty:
-                    with st.spinner("📦 Packaging..."):
-                        data, ext, mime = handle_export(selected_feature, out_fmt, filename)
-                        if data:
-                            st.download_button(
-                                f"⬇️ Save {filename}{ext}",
-                                data,
-                                f"{filename}{ext}",
-                                mime,
-                                use_container_width=True
-                            )
-
-    with col_preview:
-        st.markdown("""
-        <div class="control-panel">
-            <div class="control-panel-header">
-                <span class="icon">🗺️</span>
-                <h3>Preview</h3>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    with col_right:
+        st.markdown('<div class="minimal-card"><h3>Preview & Statistics</h3>', unsafe_allow_html=True)
 
         if selected_feature is not None and not selected_feature.empty:
-            # Stats
-            st.markdown("""
-            <div class="stats-grid">
-                <div class="stat-box">
-                    <div class="value">""" + str(len(selected_feature)) + """</div>
-                    <div class="label">Features</div>
-                </div>
-                <div class="stat-box">
-                    <div class="value">""" + str(selected_feature.geom_type.unique()[0]) + """</div>
-                    <div class="label">Geometry</div>
-                </div>
+            st.markdown(f"""
+            <div class="metric-item">
+                <div class="metric-label">Features</div>
+                <div class="metric-value">{len(selected_feature)}</div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-label">Geometry Type</div>
+                <div class="metric-value">{selected_feature.geom_type.unique()[0]}</div>
             </div>
             """, unsafe_allow_html=True)
 
             try:
                 map_data = selected_feature.to_crs(epsg=4326)
                 if len(map_data) > 1000:
-                    st.warning("⚠️ Large dataset. Showing 1,000 features.")
+                    st.info("Large dataset - showing 1000 features")
                     st.map(map_data.sample(1000))
                 else:
                     st.map(map_data)
             except Exception:
-                st.warning("📊 Visualization unavailable.")
+                st.warning("Visualization unavailable")
         else:
-            st.info("👈 Select a region to preview")
+            st.info("Select a region to preview")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
 
 def view_data_converter():
-    st.title("🔄 Universal Data Converter")
-    st.markdown("Convert vector data between multiple formats with CRS transformation")
+    st.title("🔄 Format Converter")
 
     st.markdown("""
-    <div class="control-panel">
-        <div class="control-panel-header">
-            <span class="icon">📂</span>
-            <h3>Step 1: Upload File</h3>
-        </div>
+    <div class="minimal-card">
+        <p>Convert between different geospatial vector formats. Supports Shapefile, GeoJSON, KML, 
+        and GeoPackage with optional CRS transformation.</p>
     </div>
     """, unsafe_allow_html=True)
 
+    st.markdown('<div class="minimal-card"><h3>Step 1: Upload File</h3>', unsafe_allow_html=True)
+
     uploaded_file = st.file_uploader(
-        "Choose a file",
+        "Choose file",
         type=['zip', 'shp', 'geojson', 'kml', 'gpkg', 'csv', 'xlsx'],
         label_visibility="collapsed"
     )
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
     if uploaded_file:
         gdf = None
@@ -871,92 +571,76 @@ def view_data_converter():
                     gdf = extract_and_read_first(file_path, tmp_dir)
                 elif file_path.endswith(('.csv', '.xlsx')):
                     df = pd.read_csv(file_path) if file_path.endswith('.csv') else pd.read_excel(file_path)
-                    st.warning("📊 Tabular data detected. Define geometry:")
+                    st.warning("Tabular data detected - define geometry")
                     c1, c2, c3 = st.columns(3)
                     mode = c1.radio("Type", ["Lat/Lon", "WKT"], label_visibility="collapsed")
                     if mode == "Lat/Lon":
-                        x = c2.selectbox("X (Lon)", df.columns, label_visibility="collapsed")
-                        y = c3.selectbox("Y (Lat)", df.columns, label_visibility="collapsed")
-                        if st.button("✓ Create Geometry", type="primary"):
+                        x = c2.selectbox("Lon", df.columns, label_visibility="collapsed")
+                        y = c3.selectbox("Lat", df.columns, label_visibility="collapsed")
+                        if st.button("Create Geometry", type="primary"):
                             gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df[x], df[y]), crs="EPSG:4326")
                     else:
                         wkt_c = c2.selectbox("WKT Column", df.columns, label_visibility="collapsed")
-                        if st.button("✓ Parse WKT", type="primary"):
+                        if st.button("Parse WKT", type="primary"):
                             df['geometry'] = df[wkt_c].apply(wkt.loads)
                             gdf = gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")
                 else:
                     gdf = gpd.read_file(file_path)
             except Exception as e:
-                st.error(f"❌ Read Error: {e}")
+                st.error(f"Error: {e}")
 
             if gdf is not None:
-                st.success(f"✅ Loaded: {len(gdf)} features | CRS: {gdf.crs}")
+                st.success(f"Loaded: {len(gdf)} features | CRS: {gdf.crs}")
 
-                col_sets, col_map = st.columns([1, 1.2], gap="large")
+                col_convert, col_preview = st.columns([1, 1.2], gap="large")
 
-                with col_sets:
-                    st.markdown("""
-                    <div class="control-panel">
-                        <div class="control-panel-header">
-                            <span class="icon">⚙️</span>
-                            <h3>Step 2: Convert</h3>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                with col_convert:
+                    st.markdown('<div class="minimal-card"><h3>Step 2: Configure Conversion</h3>', unsafe_allow_html=True)
 
-                    enable_crs = st.checkbox("🔄 Reproject Coordinates")
+                    enable_crs = st.checkbox("Transform CRS")
                     target_epsg = st.number_input("EPSG Code", value=4326, disabled=not enable_crs)
-                    target_format = st.selectbox("Output Format", ["ESRI Shapefile (.zip)", "GeoJSON", "GeoPackage (.gpkg)", "KML"])
+                    target_format = st.selectbox("Output Format", ["ESRI Shapefile (.zip)", "GeoJSON", "GeoPackage (.gpkg)", "KML"], label_visibility="collapsed")
 
-                    if enable_crs and st.button("Apply Projection", type="secondary"):
+                    if enable_crs and st.button("Apply CRS Transform", type="secondary"):
                         gdf = convert_crs(gdf, target_epsg)
-                        st.success(f"✅ Reprojected to EPSG:{target_epsg}")
+                        st.success(f"Reprojected to EPSG:{target_epsg}")
 
-                    if st.button("🚀 Convert File", type="primary", use_container_width=True):
-                        with st.spinner("⏳ Converting..."):
+                    if st.button("Convert & Download", type="primary", use_container_width=True):
+                        with st.spinner("Converting..."):
                             data, ext, mime = handle_export(gdf, target_format, "converted_data")
                             if data:
                                 st.download_button(
-                                    f"⬇️ Download {target_format.split(' ')[0]}",
+                                    f"Save converted{ext}",
                                     data,
                                     f"converted{ext}",
                                     mime,
                                     use_container_width=True
                                 )
+                    st.markdown("</div>", unsafe_allow_html=True)
 
-                with col_map:
-                    st.markdown("""
-                    <div class="control-panel">
-                        <div class="control-panel-header">
-                            <span class="icon">🗺️</span>
-                            <h3>Preview</h3>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-
+                with col_preview:
+                    st.markdown('<div class="minimal-card"><h3>Preview</h3>', unsafe_allow_html=True)
                     try:
                         st.map(gdf.to_crs(4326) if gdf.crs else gdf)
                     except:
-                        st.info("Visual preview not available for this geometry type.")
+                        st.info("Visual preview not available")
+                    st.markdown("</div>", unsafe_allow_html=True)
 
 def view_vector_calculator():
     st.title("🧮 Vector Calculator")
-    st.markdown("Advanced geoprocessing and spatial analysis tools")
 
-    tab1, tab2, tab3 = st.tabs(["📂 Input Data", "⚙️ Processing", "💾 Results"])
+    st.markdown("""
+    <div class="minimal-card">
+        <p>Perform spatial analysis and geoprocessing operations on vector data.</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    # TAB 1: INPUT
+    tab1, tab2, tab3 = st.tabs(["Input Data", "Processing Tools", "Results"])
+
     with tab1:
-        st.markdown("""
-        <div class="control-panel">
-            <div class="control-panel-header">
-                <span class="icon">📤</span>
-                <h3>Upload Vector Layer</h3>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown('<div class="minimal-card"><h3>Upload Layer</h3>', unsafe_allow_html=True)
 
-        uploaded_file = st.file_uploader("Choose a file", type=['zip', 'shp', 'geojson', 'kml', 'gpkg'], label_visibility="collapsed")
+        uploaded_file = st.file_uploader("Choose file", type=['zip', 'shp', 'geojson', 'kml', 'gpkg'], label_visibility="collapsed")
 
         input_gdf = None
         if uploaded_file:
@@ -971,229 +655,178 @@ def view_vector_calculator():
 
                     if input_gdf is not None:
                         st.session_state['input_gdf'] = input_gdf
-                        st.success(f"✅ Loaded: {len(input_gdf)} features | CRS: {input_gdf.crs}")
+                        st.success(f"Loaded: {len(input_gdf)} features")
                 except Exception as e:
-                    st.error(f"❌ Error: {e}")
+                    st.error(f"Error: {e}")
         elif 'input_gdf' in st.session_state:
             input_gdf = st.session_state['input_gdf']
-            st.info(f"📌 Using: {len(input_gdf)} features")
+            st.info(f"Using layer: {len(input_gdf)} features")
 
-    # TAB 2: TOOLS
+        st.markdown("</div>", unsafe_allow_html=True)
+
     with tab2:
         if 'input_gdf' in st.session_state:
             gdf = st.session_state['input_gdf']
 
-            col_cat, col_tool = st.columns([1, 2], gap="large")
+            col_tool, col_param = st.columns([1, 1.5], gap="large")
 
-            with col_cat:
-                st.markdown("""
-                <div class="control-panel">
-                    <div class="control-panel-header">
-                        <span class="icon">🛠️</span>
-                        <h3>Tools</h3>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+            with col_tool:
+                st.markdown('<div class="minimal-card"><h3>Tool Selection</h3>', unsafe_allow_html=True)
 
-                category = st.radio("Category", ["Geoprocessing", "Geometry", "Analysis", "Data Management"], label_visibility="collapsed")
+                category = st.selectbox("Category", ["Geoprocessing", "Geometry", "Analysis", "Data Management"], label_visibility="collapsed")
 
                 tool_options = []
                 if category == "Geoprocessing":
                     tool_options = ["Buffer", "Convex Hull", "Dissolve"]
                 elif category == "Geometry":
-                    tool_options = ["Centroids", "Simplify", "Multipart to Singlepart"]
+                    tool_options = ["Centroids", "Simplify", "Explode"]
                 elif category == "Analysis":
-                    tool_options = ["Basic Statistics", "Bounding Box", "Mean Coordinate"]
+                    tool_options = ["Statistics", "Bounding Box", "Mean Coordinate"]
                 elif category == "Data Management":
-                    tool_options = ["Reproject Layer", "Merge Layers"]
+                    tool_options = ["Reproject", "Merge"]
 
                 tool = st.selectbox("Operation", tool_options, label_visibility="collapsed")
+                st.markdown("</div>", unsafe_allow_html=True)
 
-            with col_tool:
-                st.markdown("""
-                <div class="control-panel">
-                    <div class="control-panel-header">
-                        <span class="icon">⚡</span>
-                        <h3>Parameters & Execute</h3>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+            with col_param:
+                st.markdown('<div class="minimal-card"><h3>Parameters</h3>', unsafe_allow_html=True)
 
                 res_gdf = None
 
                 try:
                     if tool == "Buffer":
-                        dist = st.number_input("Distance (Layer Units)", value=0.01, format="%.6f")
-                        st.caption("⚠️ For accurate results, use projected CRS (units in meters)")
-                        if st.button("▶️ Run Buffer", type="primary", use_container_width=True):
+                        dist = st.number_input("Distance (units)", value=0.01, format="%.6f")
+                        if st.button("Execute Buffer", type="primary", use_container_width=True):
                             res_gdf = gdf.copy()
                             res_gdf['geometry'] = res_gdf.geometry.buffer(dist)
 
                     elif tool == "Convex Hull":
-                        st.write("Smallest convex polygon enclosing all features")
-                        if st.button("▶️ Run Convex Hull", type="primary", use_container_width=True):
+                        if st.button("Execute Convex Hull", type="primary", use_container_width=True):
                             res_gdf = gdf.copy()
                             res_gdf['geometry'] = res_gdf.geometry.convex_hull
 
                     elif tool == "Dissolve":
-                        col = st.selectbox("Field", ["All Features"] + list(gdf.columns), label_visibility="collapsed")
-                        if st.button("▶️ Run Dissolve", type="primary", use_container_width=True):
-                            if col == "All Features":
-                                res_gdf = gdf.dissolve()
-                            else:
-                                res_gdf = gdf.dissolve(by=col)
+                        col = st.selectbox("Field", ["All"] + list(gdf.columns), label_visibility="collapsed")
+                        if st.button("Execute Dissolve", type="primary", use_container_width=True):
+                            res_gdf = gdf.dissolve() if col == "All" else gdf.dissolve(by=col)
 
                     elif tool == "Centroids":
-                        if st.button("▶️ Calculate Centroids", type="primary", use_container_width=True):
+                        if st.button("Calculate Centroids", type="primary", use_container_width=True):
                             res_gdf = gdf.copy()
                             res_gdf['geometry'] = res_gdf.geometry.centroid
 
                     elif tool == "Simplify":
                         tol = st.number_input("Tolerance", value=0.001, format="%.6f")
-                        if st.button("▶️ Run Simplify", type="primary", use_container_width=True):
+                        if st.button("Execute Simplify", type="primary", use_container_width=True):
                             res_gdf = gdf.copy()
                             res_gdf['geometry'] = res_gdf.geometry.simplify(tol)
 
-                    elif tool == "Multipart to Singlepart":
-                        if st.button("▶️ Explode Features", type="primary", use_container_width=True):
+                    elif tool == "Explode":
+                        if st.button("Execute Explode", type="primary", use_container_width=True):
                             res_gdf = gdf.explode(index_parts=True).reset_index(drop=True)
 
-                    elif tool == "Basic Statistics":
-                        if st.button("▶️ Calculate Stats", type="primary", use_container_width=True):
+                    elif tool == "Statistics":
+                        if st.button("Calculate Stats", type="primary", use_container_width=True):
                             res_gdf = gdf.copy()
                             res_gdf['area'] = res_gdf.geometry.area
                             res_gdf['perimeter'] = res_gdf.geometry.length
                             st.dataframe(res_gdf[['area', 'perimeter']].describe(), use_container_width=True)
 
                     elif tool == "Bounding Box":
-                        if st.button("▶️ Generate BBox", type="primary", use_container_width=True):
+                        if st.button("Generate BBox", type="primary", use_container_width=True):
                             res_gdf = gdf.copy()
                             res_gdf['geometry'] = res_gdf.geometry.envelope
 
                     elif tool == "Mean Coordinate":
-                        if st.button("▶️ Calculate Mean", type="primary", use_container_width=True):
+                        if st.button("Calculate Mean", type="primary", use_container_width=True):
                             x = gdf.geometry.centroid.x.mean()
                             y = gdf.geometry.centroid.y.mean()
                             res_gdf = gpd.GeoDataFrame({'geometry': gpd.points_from_xy([x], [y])}, crs=gdf.crs)
 
-                    elif tool == "Reproject Layer":
-                        epsg = st.number_input("EPSG Code", value=3857, step=1)
-                        if st.button("▶️ Reproject", type="primary", use_container_width=True):
+                    elif tool == "Reproject":
+                        epsg = st.number_input("EPSG Code", value=3857)
+                        if st.button("Execute Reproject", type="primary", use_container_width=True):
                             res_gdf = gdf.to_crs(epsg=epsg)
 
-                    elif tool == "Merge Layers":
-                        st.info("ℹ️ Duplicates layer (merge multiple layers coming soon)")
-                        if st.button("▶️ Merge", type="primary", use_container_width=True):
+                    elif tool == "Merge":
+                        if st.button("Execute Merge", type="primary", use_container_width=True):
                             res_gdf = pd.concat([gdf, gdf])
 
                     if res_gdf is not None:
                         st.session_state['calc_result_gdf'] = res_gdf
                         st.session_state['calc_result_name'] = f"{tool}_Result"
-                        st.success("✅ Complete! Go to Results tab")
+                        st.success("Complete!")
 
                 except Exception as e:
-                    st.error(f"❌ Failed: {e}")
-        else:
-            st.info("👈 Upload data in the Input Data tab first")
+                    st.error(f"Error: {e}")
 
-    # TAB 3: EXPORT
+                st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.info("Upload data first")
+
     with tab3:
         if st.session_state['calc_result_gdf'] is not None:
             res_gdf = st.session_state['calc_result_gdf']
             res_name = st.session_state['calc_result_name']
 
-            st.markdown(f"""
-            <div class="control-panel">
-                <div class="control-panel-header">
-                    <span class="icon">📊</span>
-                    <h3>{res_name}</h3>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f'<div class="minimal-card"><h3>{res_name}</h3>', unsafe_allow_html=True)
 
-            # Map
             try:
                 st.map(res_gdf.to_crs(4326) if res_gdf.crs else res_gdf)
             except:
-                st.warning("⚠️ Cannot visualize this geometry")
+                st.warning("Cannot visualize")
 
-            st.divider()
-
-            # Export
-            c_ex1, c_ex2 = st.columns([2, 1], gap="medium")
-            with c_ex1:
-                fmt = st.selectbox(
-                    "Output Format",
-                    ["ESRI Shapefile (.zip)", "GeoJSON", "KML", "GeoPackage"],
-                    key="calc_export_fmt"
-                )
-
-            with c_ex2:
+            col1, col2 = st.columns(2)
+            with col1:
+                fmt = st.selectbox("Format", ["ESRI Shapefile (.zip)", "GeoJSON", "KML", "GeoPackage"], key="calc_fmt")
+            with col2:
                 data, ext, mime = handle_export(res_gdf, fmt, res_name)
                 if data:
-                    st.download_button(
-                        label=f"⬇️ Download {fmt.split(' ')[0]}",
-                        data=data,
-                        file_name=f"{res_name}{ext}",
-                        mime=mime,
-                        use_container_width=True,
-                        type="primary"
-                    )
-        else:
-            st.info("👈 Process data in the Processing tab first")
+                    st.download_button(f"Download {fmt.split()[0]}", data, f"{res_name}{ext}", mime, use_container_width=True)
 
-# --- 7. MAIN APP ---
+            st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.info("No results to export")
 
 def main():
-    if 'current_tab' not in st.session_state:
-        st.session_state.current_tab = "home"
+    # Sidebar Navigation
+    with st.sidebar:
+        st.markdown('<p class="sidebar-title">🌍 GeoFormatX</p>', unsafe_allow_html=True)
+        st.markdown('<p class="sidebar-subtitle">Advanced Geospatial Toolkit v5.0</p>', unsafe_allow_html=True)
 
-    # Top Navigation
-    st.markdown("""
-    <div style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
-    """, unsafe_allow_html=True)
+        st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
+        mode = st.radio("Modules", 
+                       ["📥 Admin Downloader", "🔄 Converter", "🧮 Vector Calculator"],
+                       label_visibility="collapsed")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    nav_cols = st.columns([1, 1, 1, 1])
+        st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
+        st.markdown("**Quick Info**")
+        st.caption("Convert and transform geospatial vector data across multiple formats.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    with nav_cols[0]:
-        if st.button("🏠 Home", use_container_width=True, type="secondary" if st.session_state.current_tab != "home" else "primary"):
-            st.session_state.current_tab = "home"
-            st.rerun()
+        st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
+        st.markdown("**Supported Formats**")
+        st.markdown("- Shapefile (SHP)")
+        st.markdown("- GeoJSON")
+        st.markdown("- KML")
+        st.markdown("- GeoPackage (GPKG)")
+        st.markdown("- CSV / Excel")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    with nav_cols[1]:
-        if st.button("📥 Downloader", use_container_width=True, type="secondary" if st.session_state.current_tab != "downloader" else "primary"):
-            st.session_state.current_tab = "downloader"
-            st.rerun()
-
-    with nav_cols[2]:
-        if st.button("🔄 Converter", use_container_width=True, type="secondary" if st.session_state.current_tab != "converter" else "primary"):
-            st.session_state.current_tab = "converter"
-            st.rerun()
-
-    with nav_cols[3]:
-        if st.button("🧮 Calculator", use_container_width=True, type="secondary" if st.session_state.current_tab != "calculator" else "primary"):
-            st.session_state.current_tab = "calculator"
-            st.rerun()
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    st.divider()
-
-    # Route to current page
-    if st.session_state.current_tab == "home":
-        view_home()
-    elif st.session_state.current_tab == "downloader":
+    # Main Content
+    if mode == "📥 Admin Downloader":
         view_admin_downloader()
-    elif st.session_state.current_tab == "converter":
+    elif mode == "🔄 Converter":
         view_data_converter()
-    elif st.session_state.current_tab == "calculator":
+    elif mode == "🧮 Vector Calculator":
         view_vector_calculator()
 
     # Footer
     st.divider()
     st.markdown("""
-    <div style="text-align: center; padding: 1rem; color: #666; font-size: 0.9rem;">
-        <p>🌍 GeoFormatX v5.0 | Advanced Geospatial Toolkit | <a href="#" style="color: #0068C9; text-decoration: none;">Learn More</a></p>
+    <div style="text-align: center; font-size: 0.85rem; color: #999; margin-top: 2rem;">
+        <p>GeoFormatX v5.0 | Geospatial Data Processing Platform</p>
     </div>
     """, unsafe_allow_html=True)
 
