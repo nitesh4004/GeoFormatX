@@ -25,20 +25,17 @@ fiona.drvsupport.supported_drivers['LIBKML'] = 'rw'
 # --- 2. Improved UI/UX (Theme Safe) ---
 st.markdown("""
     <style>
-    /* Import professional font: Poppins */
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap');
     
     html, body, [class*="css"] {
         font-family: 'Poppins', sans-serif;
     }
     
-    /* Improve spacing for a cleaner look without breaking themes */
     .block-container {
         padding-top: 2rem;
         padding-bottom: 2rem;
     }
 
-    /* Style primary buttons to be more prominent */
     div[data-testid="stButton"] > button[kind="primary"] {
         background-color: #0068C9;
         color: white;
@@ -52,7 +49,6 @@ st.markdown("""
         border: none;
     }
     
-    /* Subtle border radius for inputs */
     .stTextInput > div > div > input {
         border-radius: 8px;
     }
@@ -408,19 +404,157 @@ def view_data_converter():
                         except:
                             st.write("Visual preview not available.")
 
+def view_vector_calculator():
+    st.title("Vector Calculator")
+    st.markdown("Perform vector analysis, geometry operations, and geoprocessing tasks.")
+    
+    # 1. Upload Section
+    with st.container(border=True):
+        st.subheader("1. Input Data")
+        uploaded_file = st.file_uploader("Upload Vector Layer", type=['zip', 'shp', 'geojson', 'kml', 'gpkg'])
+    
+    gdf = None
+    if uploaded_file:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            file_path = os.path.join(tmp_dir, uploaded_file.name)
+            with open(file_path, "wb") as f: f.write(uploaded_file.getbuffer())
+            
+            try:
+                if file_path.endswith('.zip'):
+                    gdf = extract_and_read_first(file_path, tmp_dir)
+                else:
+                    gdf = gpd.read_file(file_path, engine='fiona')
+            except Exception as e:
+                st.error(f"Load Error: {e}")
+
+    if gdf is not None:
+        st.info(f"Loaded {len(gdf)} features. CRS: {gdf.crs}")
+        
+        # 2. Tool Selection Interface (QGIS Style)
+        col_menu, col_wksp = st.columns([1, 2], gap="large")
+        
+        with col_menu:
+            st.subheader("2. Toolbox")
+            tool_category = st.radio(
+                "Category",
+                ["Geoprocessing Tools", "Geometry Tools", "Analysis Tools", "Data Management"]
+            )
+            
+            tool = None
+            
+            if tool_category == "Geoprocessing Tools":
+                tool = st.selectbox("Select Tool", ["Buffer", "Convex Hull", "Dissolve", "Difference (Clip)"])
+            elif tool_category == "Geometry Tools":
+                tool = st.selectbox("Select Tool", ["Centroids", "Simplify", "Multi to Singleparts", "Extract Vertices"])
+            elif tool_category == "Analysis Tools":
+                tool = st.selectbox("Select Tool", ["Basic Statistics", "Bounding Box (Envelope)", "Mean Coordinates"])
+            elif tool_category == "Data Management":
+                tool = st.selectbox("Select Tool", ["Reproject Layer", "Merge (Simulate)"])
+
+        # 3. Workspace
+        with col_wksp:
+            st.subheader(f"3. Run: {tool}")
+            result_gdf = None
+            
+            # --- TOOL LOGIC ---
+            try:
+                if tool == "Buffer":
+                    dist = st.number_input("Buffer Distance (in layer CRS units)", value=0.01, format="%.6f")
+                    st.caption("Note: If CRS is WGS84, distance is in degrees. For meters, reproject first.")
+                    if st.button("Run Buffer", type="primary"):
+                        result_gdf = gdf.copy()
+                        result_gdf['geometry'] = result_gdf.geometry.buffer(dist)
+                
+                elif tool == "Convex Hull":
+                    if st.button("Run Convex Hull", type="primary"):
+                        result_gdf = gdf.copy()
+                        result_gdf['geometry'] = result_gdf.geometry.convex_hull
+
+                elif tool == "Dissolve":
+                    dissolve_col = st.selectbox("Dissolve Field (Optional)", ["None (Dissolve All)"] + list(gdf.columns))
+                    if st.button("Run Dissolve", type="primary"):
+                        if dissolve_col == "None (Dissolve All)":
+                            result_gdf = gdf.dissolve()
+                        else:
+                            result_gdf = gdf.dissolve(by=dissolve_col)
+                
+                elif tool == "Centroids":
+                    if st.button("Extract Centroids", type="primary"):
+                        result_gdf = gdf.copy()
+                        result_gdf['geometry'] = result_gdf.geometry.centroid
+
+                elif tool == "Simplify":
+                    tol = st.number_input("Tolerance", value=0.001, format="%.6f")
+                    if st.button("Run Simplify", type="primary"):
+                        result_gdf = gdf.copy()
+                        result_gdf['geometry'] = result_gdf.geometry.simplify(tol)
+                
+                elif tool == "Multi to Singleparts":
+                    if st.button("Explode Multipart", type="primary"):
+                        result_gdf = gdf.explode(index_parts=True).reset_index(drop=True)
+
+                elif tool == "Basic Statistics":
+                    st.write("Calculates Area and Perimeter for the layer.")
+                    if st.button("Calculate Stats", type="primary"):
+                        stats_gdf = gdf.copy()
+                        stats_gdf['area'] = stats_gdf.geometry.area
+                        stats_gdf['length'] = stats_gdf.geometry.length
+                        st.dataframe(stats_gdf[['area', 'length']].describe())
+                        result_gdf = stats_gdf # Allow download of attribute table
+
+                elif tool == "Reproject Layer":
+                    target = st.number_input("Target EPSG Code", value=3857, step=1)
+                    if st.button("Reproject", type="primary"):
+                        result_gdf = gdf.to_crs(epsg=target)
+                        st.success(f"Reprojected to EPSG:{target}")
+
+                elif tool == "Bounding Box (Envelope)":
+                    if st.button("Get Envelope", type="primary"):
+                        result_gdf = gdf.copy()
+                        result_gdf['geometry'] = result_gdf.geometry.envelope
+
+                # --- RESULT HANDLING ---
+                if result_gdf is not None:
+                    st.success("Operation Successful!")
+                    
+                    # Preview
+                    with st.expander("Result Preview", expanded=True):
+                        try:
+                            viz_data = result_gdf.to_crs(4326) if result_gdf.crs else result_gdf
+                            st.map(viz_data)
+                        except:
+                            st.write("Cannot map result (might be non-spatial geometry).")
+                    
+                    # Download
+                    col_dl_fmt, col_dl_btn = st.columns(2)
+                    fmt = col_dl_fmt.selectbox("Download Format", ["GeoJSON", "ESRI Shapefile (.zip)", "KML"], key="res_fmt")
+                    
+                    data, ext, mime = handle_export(result_gdf, fmt, "calculator_result")
+                    if data:
+                        col_dl_btn.download_button("💾 Download Result", data, f"result{ext}", mime)
+            
+            except Exception as e:
+                st.error(f"Processing Error: {str(e)}")
+
+
 def main():
     with st.sidebar:
         st.title("geoFormatX")
-        mode = st.radio("Mode", ["📥 Admin Downloader", "🔄 Converter"])
+        st.markdown("### Menu")
+        mode = st.radio(
+            "Select Tool", 
+            ["📥 Admin Downloader", "🔄 Converter", "🧮 Vector Calculator"]
+        )
         st.divider()
-        st.caption("v2.1 | Theme Aware")
+        st.caption("v3.0 | Theme Aware")
+        st.caption("Includes: Geoprocessing, Geometry, & Analysis Tools")
 
     if mode == "📥 Admin Downloader":
         view_admin_downloader()
-    else:
+    elif mode == "🔄 Converter":
         view_data_converter()
+    elif mode == "🧮 Vector Calculator":
+        view_vector_calculator()
 
 if __name__ == "__main__":
     main()
-
-
