@@ -6,8 +6,6 @@ import os
 import tempfile
 import gdown
 import requests
-import shutil
-import glob
 from zipfile import ZipFile
 from io import BytesIO
 from shapely import wkt
@@ -21,7 +19,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Enable KML drivers for Geopandas
+# Enable KML drivers
 fiona.drvsupport.supported_drivers['KML'] = 'rw'
 fiona.drvsupport.supported_drivers['LIBKML'] = 'rw'
 
@@ -35,7 +33,7 @@ if 'input_gdf' not in st.session_state:
 if 'overlay_gdf' not in st.session_state:
     st.session_state['overlay_gdf'] = None
 
-# --- 2. STYLING ---
+# --- 2. CLEAN MINIMALIST STYLING ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap');
@@ -95,18 +93,6 @@ st.markdown("""
         gap: 0.5rem;
     }
 
-    /* ArcPy Specific Styling */
-    .arcpy-badge {
-        background-color: #6a1b9a;
-        color: white;
-        padding: 0.2rem 0.5rem;
-        border-radius: 4px;
-        font-size: 0.75rem;
-        font-weight: bold;
-        margin-bottom: 0.5rem;
-        display: inline-block;
-    }
-
     @media (prefers-color-scheme: dark) {
         .minimal-card {
             background: #1E1E1E;
@@ -123,6 +109,14 @@ st.markdown("""
             border-color: #363945;
             color: #FAFAFA;
         }
+    }
+
+    /* === SECTION DIVIDER === */
+    .section-break {
+        height: 1px;
+        background: linear-gradient(90deg, transparent, #0068C9, transparent);
+        margin: 2rem 0;
+        opacity: 0.3;
     }
 
     /* === SIDEBAR STYLING === */
@@ -146,7 +140,11 @@ st.markdown("""
         padding-bottom: 1rem;
         border-bottom: 1px solid rgba(0,104,201,0.1);
     }
-    
+
+    .sidebar-section:last-child {
+        border-bottom: none;
+    }
+
     /* === BUTTON STYLING === */
     .stButton > button {
         background-color: #0068C9;
@@ -156,14 +154,33 @@ st.markdown("""
         font-weight: 600;
         padding: 0.6rem 1.2rem;
         transition: all 0.2s ease;
+        letter-spacing: 0.2px;
     }
+
     .stButton > button:hover {
         background-color: #0053a6;
         box-shadow: 0 4px 12px rgba(0,104,201,0.25);
         transform: translateY(-1px);
     }
-    
-    /* === METRIC ITEMS === */
+
+    /* === INPUT STYLING === */
+    .stTextInput > div > div > input,
+    .stSelectbox > div > div > div,
+    .stNumberInput > div > div > input {
+        border: 1px solid #DDDDDD;
+        border-radius: 4px;
+        padding: 0.6rem 0.8rem;
+        font-family: 'Outfit', sans-serif;
+    }
+
+    .stTextInput > div > div > input:focus,
+    .stSelectbox > div > div > div:focus,
+    .stNumberInput > div > div > input:focus {
+        border-color: #0068C9;
+        box-shadow: 0 0 0 2px rgba(0,104,201,0.1);
+    }
+
+    /* === METRIC STYLING === */
     .metric-item {
         display: inline-block;
         padding: 0.75rem 1.5rem;
@@ -173,19 +190,98 @@ st.markdown("""
         margin-bottom: 0.5rem;
         border-left: 3px solid #0068C9;
     }
+
+    .metric-label {
+        font-size: 0.8rem;
+        color: #0068C9;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
     .metric-value {
         font-size: 1.5rem;
         font-weight: 700;
         color: #1a1a1a;
     }
+
     @media (prefers-color-scheme: dark) {
-        .metric-item { background: #2a2a2a; }
-        .metric-value { color: #FFFFFF; }
+        .metric-item {
+            background: #2a2a2a;
+        }
+        .metric-value {
+            color: #FFFFFF;
+        }
+    }
+
+    /* === TABS (Minimal) === */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 0;
+        border-bottom: 2px solid #EEEEEE;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        border-bottom: 3px solid transparent;
+        border-radius: 0;
+        padding: 1rem 1.5rem;
+        font-weight: 500;
+        color: #999999;
+    }
+
+    .stTabs [aria-selected="true"] {
+        border-bottom-color: #0068C9;
+        color: #0068C9;
+    }
+
+    /* === ALERTS === */
+    .stSuccess, .stWarning, .stError, .stInfo {
+        border-radius: 4px;
+        border-left: 4px solid;
+    }
+
+    .stSuccess {
+        border-left-color: #10B981;
+    }
+
+    .stWarning {
+        border-left-color: #F59E0B;
+    }
+
+    .stError {
+        border-left-color: #EF4444;
+    }
+
+    .stInfo {
+        border-left-color: #0068C9;
+    }
+
+    /* === EXPANDER === */
+    .streamlit-expanderHeader {
+        border-left: 3px solid #0068C9;
+        padding-left: 0.75rem;
+    }
+    
+    /* === COLUMNS PADDING === */
+    [data-testid="column"] {
+        padding: 0 0.5rem;
+    }
+
+    /* === HEADER STYLING === */
+    h1 {
+        color: #1a1a1a;
+        border-bottom: 3px solid #0068C9;
+        padding-bottom: 0.75rem;
+    }
+
+    @media (prefers-color-scheme: dark) {
+        h1 {
+            color: #FFFFFF;
+        }
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. DATA CONSTANTS ---
+# --- 3. DATA CONSTANTS (Complete) ---
 STATE_VILLAGE_IDS = {
     "ANDAMAN_&_NICOBAR_ISLANDS": "1aikaQXqP9xtDhMcQFyUn8g9gGi0Tam0s",
     "ANDHRA_PRADESH": "1fkDuJI6oC0h8LQCvCh9elhKq0KbXQbTj",
@@ -349,6 +445,8 @@ def view_admin_downloader():
         2.  **Filter Data:** Depending on the granularity, use the dropdown menus to narrow down the specific region you need.
         3.  **Choose Format:** Select a GIS format (Shapefile, GeoJSON, KML, or GeoPackage).
         4.  **Download:** Click the button to process and download the file.
+        
+        *Note: Village maps are large files and may take a moment to process.*
         """)
 
     col_left, col_right = st.columns([1.3, 1.7], gap="large")
@@ -583,12 +681,12 @@ def view_data_converter():
                     st.markdown("</div>", unsafe_allow_html=True)
 
 def view_vector_calculator():
-    st.title("🧮 Vector Calculator (Open Source)")
+    st.title("🧮 Vector Calculator")
 
     st.markdown("""
     <div class="minimal-card">
-        <p>Perform advanced spatial analysis and geoprocessing operations using Open Source libraries (Geopandas/Shapely).
-        Suitable for cloud deployments.</p>
+        <p>Perform advanced spatial analysis and geoprocessing operations. 
+        Features include Overlay analysis, Spatial Joins, and Topology repairs.</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -598,6 +696,8 @@ def view_vector_calculator():
         2.  **Processing Tools:** Select a category (Geoprocessing, Analysis, Overlay, etc.).
         3.  **Parameters:** Configure the specific tool (e.g., buffer distance in degrees).
         4.  **Results:** View the output on the map and export it in your desired format.
+        
+        *Tip: For Overlay and Spatial Join tools, you will need to upload a secondary layer.*
         """)
 
     tab1, tab2, tab3 = st.tabs(["1. Input Data", "2. Processing Tools", "3. Results"])
@@ -627,6 +727,7 @@ def view_vector_calculator():
 
         st.markdown("</div>", unsafe_allow_html=True)
         
+        # Secondary Layer Uploader for Overlay/Join
         st.markdown('<div class="minimal-card"><h3>Secondary Layer (Optional)</h3>', unsafe_allow_html=True)
         st.caption("Required only for Overlay and Spatial Join operations.")
         uploaded_overlay = st.file_uploader("Upload Secondary Layer", type=['zip', 'shp', 'geojson', 'kml', 'gpkg'], label_visibility="collapsed", key="sec_up")
@@ -665,7 +766,7 @@ def view_vector_calculator():
                 if category == "Geoprocessing":
                     tool_options = ["Buffer", "Convex Hull", "Dissolve"]
                 elif category == "Geometry":
-                    tool_options = ["Centroids", "Simplify", "Explode", "Fix Geometries (Shapely)"]
+                    tool_options = ["Centroids", "Simplify", "Explode", "Fix Geometries"]
                 elif category == "Analysis":
                     tool_options = ["Statistics", "Bounding Box", "Mean Coordinate"]
                 elif category == "Overlay Operations":
@@ -682,51 +783,54 @@ def view_vector_calculator():
                 res_gdf = None
 
                 try:
+                    # --- Geoprocessing ---
                     if tool == "Buffer":
-                        render_guideline("Buffer", "Creates a polygon surrounding the geometry at a specified distance.")
+                        render_guideline("Buffer", "Creates a polygon surrounding the geometry at a specified distance. Distance units depend on the CRS (e.g., degrees for WGS84, meters for UTM).")
                         dist = st.number_input("Distance (units)", value=0.01, format="%.6f")
                         if st.button("Execute Buffer", type="primary", use_container_width=True):
                             res_gdf = gdf.copy()
                             res_gdf['geometry'] = res_gdf.geometry.buffer(dist)
 
                     elif tool == "Convex Hull":
-                        render_guideline("Convex Hull", "Creates the smallest convex polygon that encloses all points.")
+                        render_guideline("Convex Hull", "Creates the smallest convex polygon that encloses all points in the geometry (like wrapping a rubber band around nails).")
                         if st.button("Execute Convex Hull", type="primary", use_container_width=True):
                             res_gdf = gdf.copy()
                             res_gdf['geometry'] = res_gdf.geometry.convex_hull
 
                     elif tool == "Dissolve":
-                        render_guideline("Dissolve", "Aggregates features based on a specific attribute.")
+                        render_guideline("Dissolve", "Aggregates features based on a specific attribute. Similar to 'Group By' in SQL.")
                         col = st.selectbox("Field", ["All"] + list(gdf.columns), label_visibility="collapsed")
                         if st.button("Execute Dissolve", type="primary", use_container_width=True):
                             res_gdf = gdf.dissolve() if col == "All" else gdf.dissolve(by=col)
 
+                    # --- Geometry ---
                     elif tool == "Centroids":
-                        render_guideline("Centroids", "Converts polygons/lines to center points.")
+                        render_guideline("Centroids", "Converts polygons or lines into a single point representing the geometric center.")
                         if st.button("Calculate Centroids", type="primary", use_container_width=True):
                             res_gdf = gdf.copy()
                             res_gdf['geometry'] = res_gdf.geometry.centroid
 
                     elif tool == "Simplify":
-                        render_guideline("Simplify", "Reduces vertices while preserving shape.")
+                        render_guideline("Simplify", "Reduces the number of vertices in a geometry while preserving its shape (Douglas-Peucker algorithm).")
                         tol = st.number_input("Tolerance", value=0.001, format="%.6f")
                         if st.button("Execute Simplify", type="primary", use_container_width=True):
                             res_gdf = gdf.copy()
                             res_gdf['geometry'] = res_gdf.geometry.simplify(tol)
                             
                     elif tool == "Explode":
-                        render_guideline("Explode", "Separates Multipart features into Singlepart features.")
+                        render_guideline("Explode", "Separates Multipart features (e.g., a set of islands stored as one row) into Singlepart features (one row per island).")
                         if st.button("Execute Explode", type="primary", use_container_width=True):
                             res_gdf = gdf.explode(index_parts=True).reset_index(drop=True)
 
-                    elif tool == "Fix Geometries (Shapely)":
-                        render_guideline("Fix Geometries", "Attempts to repair invalid geometries using a zero-buffer.")
+                    elif tool == "Fix Geometries":
+                        render_guideline("Fix Geometries", "Attempts to repair invalid geometries (e.g., self-intersections) by applying a zero-distance buffer.")
                         if st.button("Execute Repair", type="primary", use_container_width=True):
                             res_gdf = gdf.copy()
                             res_gdf['geometry'] = res_gdf.geometry.buffer(0)
 
+                    # --- Analysis ---
                     elif tool == "Statistics":
-                        render_guideline("Statistics", "Calculates Area and Perimeter.")
+                        render_guideline("Statistics", "Calculates basic geometric properties like Area and Perimeter.")
                         if st.button("Calculate Stats", type="primary", use_container_width=True):
                             res_gdf = gdf.copy()
                             res_gdf['area'] = res_gdf.geometry.area
@@ -734,66 +838,72 @@ def view_vector_calculator():
                             st.dataframe(res_gdf[['area', 'perimeter']].describe(), use_container_width=True)
 
                     elif tool == "Bounding Box":
-                        render_guideline("Bounding Box", "Creates a rectangular envelope around features.")
+                        render_guideline("Bounding Box", "Creates a rectangular box representing the maximum extents of each feature.")
                         if st.button("Generate BBox", type="primary", use_container_width=True):
                             res_gdf = gdf.copy()
                             res_gdf['geometry'] = res_gdf.geometry.envelope
 
                     elif tool == "Mean Coordinate":
-                        render_guideline("Mean Coordinate", "Calculates the average center of all features.")
+                        render_guideline("Mean Coordinate", "Calculates the average X and Y center of all features combined.")
                         if st.button("Calculate Mean", type="primary", use_container_width=True):
                             x = gdf.geometry.centroid.x.mean()
                             y = gdf.geometry.centroid.y.mean()
                             res_gdf = gpd.GeoDataFrame({'geometry': gpd.points_from_xy([x], [y])}, crs=gdf.crs)
 
+                    # --- Overlay Operations (Replaces Advanced GIS Tools) ---
                     elif tool in ["Intersection", "Difference", "Union", "Spatial Join"]:
                         if sec_gdf is None:
-                            st.error("⚠️ Secondary Layer required for Overlay operations.")
+                            st.error("⚠️ Secondary Layer required for Overlay operations. Please upload it in the 'Input Data' tab.")
                         else:
+                            # Ensure CRS match
                             if gdf.crs != sec_gdf.crs:
-                                st.warning(f"CRS Mismatch. Reprojecting Secondary to {gdf.crs}.")
+                                st.warning(f"CRS Mismatch detected. Reprojecting Secondary Layer to match Primary ({gdf.crs}).")
                                 sec_gdf = sec_gdf.to_crs(gdf.crs)
 
                             if tool == "Intersection":
-                                render_guideline("Intersection", "Returns the area common to both layers.")
+                                render_guideline("Intersection", "Returns the area common to both layers (AND operation).")
                                 if st.button("Run Intersection", type="primary"):
                                     res_gdf = gpd.overlay(gdf, sec_gdf, how='intersection')
+                            
                             elif tool == "Difference":
-                                render_guideline("Difference", "Subtracts Secondary layer from Primary.")
+                                render_guideline("Difference", "Subtracts the Secondary Layer area from the Primary Layer (NOT operation).")
                                 if st.button("Run Difference", type="primary"):
                                     res_gdf = gpd.overlay(gdf, sec_gdf, how='difference')
+                                    
                             elif tool == "Union":
-                                render_guideline("Union", "Combines all features from both layers.")
+                                render_guideline("Union", "Combines all features from both layers (OR operation).")
                                 if st.button("Run Union", type="primary"):
                                     res_gdf = gpd.overlay(gdf, sec_gdf, how='union')
+
                             elif tool == "Spatial Join":
-                                render_guideline("Spatial Join", "Joins attributes based on location.")
-                                op = st.selectbox("Predicate", ["intersects", "contains", "within"], index=0)
+                                render_guideline("Spatial Join", "Joins attributes from the Secondary Layer to the Primary Layer based on spatial location.")
+                                op = st.selectbox("Join Predicate", ["intersects", "contains", "within"], index=0)
                                 if st.button("Run Spatial Join", type="primary"):
                                     res_gdf = gpd.sjoin(gdf, sec_gdf, how="inner", predicate=op)
 
+                    # --- Data Management ---
                     elif tool == "Reproject":
-                        render_guideline("Reproject", "Transforms data to a new Coordinate System.")
+                        render_guideline("Reproject", "Transforms data to a new Coordinate Reference System (EPSG code).")
                         epsg = st.number_input("Target EPSG Code", value=3857)
                         if st.button("Execute Reproject", type="primary", use_container_width=True):
                             res_gdf = gdf.to_crs(epsg=epsg)
 
                     elif tool == "Merge":
-                        render_guideline("Merge", "Demonstration: Appends layer to itself.")
+                        render_guideline("Merge", "Duplicates the current layer and appends it to itself (demonstration of appending data).")
                         if st.button("Execute Merge", type="primary", use_container_width=True):
                             res_gdf = pd.concat([gdf, gdf])
 
                     if res_gdf is not None:
                         st.session_state['calc_result_gdf'] = res_gdf
                         st.session_state['calc_result_name'] = f"{tool}_Result"
-                        st.success("Processing Complete!")
+                        st.success("Processing Complete! Go to 'Results' tab to download.")
 
                 except Exception as e:
                     st.error(f"Processing Error: {e}")
 
                 st.markdown("</div>", unsafe_allow_html=True)
         else:
-            st.info("Please upload a Primary Layer first.")
+            st.info("Please upload a Primary Layer in the 'Input Data' tab first.")
 
     with tab3:
         if st.session_state['calc_result_gdf'] is not None:
@@ -805,7 +915,7 @@ def view_vector_calculator():
             try:
                 st.map(res_gdf.to_crs(4326) if res_gdf.crs else res_gdf)
             except:
-                st.warning("Cannot visualize result.")
+                st.warning("Cannot visualize result (likely non-spatial or empty).")
 
             col1, col2 = st.columns(2)
             with col1:
@@ -819,130 +929,6 @@ def view_vector_calculator():
         else:
             st.info("No results generated yet.")
 
-# --- 6. ARCPY MODULE ---
-
-def view_arcpy_toolbox():
-    st.title("🛠️ ArcPy Toolbox (Local)")
-
-    st.markdown("""
-    <div class="minimal-card">
-        <div class="arcpy-badge">ARCGIS PRO REQUIRED</div>
-        <p>Access specialized ESRI Geoprocessing tools. This module requires a local installation of ArcGIS Pro and a valid license.
-        It will not work on cloud hosting environments.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Check for ArcPy Availability
-    arcpy_available = False
-    try:
-        import arcpy
-        arcpy_available = True
-    except ImportError:
-        st.error("⚠️ ArcPy not detected. This module works only if you run this app locally within an ArcGIS Pro python environment.")
-        return
-
-    if arcpy_available:
-        with st.expander("📖 User Guide: ArcPy Tools"):
-            st.markdown("""
-            1.  **Upload:** Upload a zipped Shapefile.
-            2.  **Select Tool:** Choose a specialized ArcPy tool (e.g., Repair Geometry).
-            3.  **Process:** The app saves the file locally, runs ArcPy, and provides a download link.
-            """)
-
-        st.markdown('<div class="minimal-card"><h3>Input Data</h3>', unsafe_allow_html=True)
-        uploaded_file = st.file_uploader("Upload Shapefile (Zip)", type=['zip'], label_visibility="collapsed")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        if uploaded_file:
-            # ArcPy requires file paths, not memory buffers.
-            # We must save upload to a temp folder.
-            temp_dir = tempfile.mkdtemp()
-            zip_path = os.path.join(temp_dir, "input.zip")
-            
-            with open(zip_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            
-            # Extract
-            with ZipFile(zip_path, 'r') as z:
-                z.extractall(temp_dir)
-            
-            # Find Shapefile
-            shp_path = None
-            for root, dirs, files in os.walk(temp_dir):
-                for file in files:
-                    if file.endswith(".shp"):
-                        shp_path = os.path.join(root, file)
-                        break
-            
-            if shp_path:
-                st.success(f"Loaded for ArcPy: {os.path.basename(shp_path)}")
-                
-                col_tool, col_run = st.columns([1, 2], gap="large")
-                
-                with col_tool:
-                    st.markdown('<div class="minimal-card"><h3>Select Tool</h3>', unsafe_allow_html=True)
-                    arc_tool = st.radio("Tool", ["Repair Geometry", "Smooth Line (PAEK)", "Count Features"], label_visibility="collapsed")
-                    st.markdown("</div>", unsafe_allow_html=True)
-
-                with col_run:
-                    st.markdown('<div class="minimal-card"><h3>Execution</h3>', unsafe_allow_html=True)
-                    
-                    if arc_tool == "Repair Geometry":
-                        render_guideline("Repair Geometry", "Uses ArcPy's robust engine to fix self-intersections, null geometries, and topological errors. 'Delete Features' method used.")
-                        if st.button("Run Repair", type="primary"):
-                            try:
-                                with st.spinner("ArcPy is repairing geometry..."):
-                                    # Create a copy to work on
-                                    out_name = "repaired.shp"
-                                    out_path = os.path.join(temp_dir, out_name)
-                                    arcpy.management.CopyFeatures(shp_path, out_path)
-                                    
-                                    # Run Repair
-                                    arcpy.management.RepairGeometry(out_path, delete_null="DELETE_NULL")
-                                    
-                                    # Zip result
-                                    shutil.make_archive(os.path.join(temp_dir, "repaired_output"), 'zip', temp_dir, out_name)
-                                    
-                                    with open(os.path.join(temp_dir, "repaired_output.zip"), "rb") as f:
-                                        st.download_button("Download Repaired Shapefile", f, "repaired_shp.zip", "application/zip")
-                                        
-                            except Exception as e:
-                                st.error(f"ArcPy Error: {e}")
-
-                    elif arc_tool == "Smooth Line (PAEK)":
-                        render_guideline("Smooth Line", "Smooths sharp angles in lines using the PAEK algorithm. Requires Line input.")
-                        tol = st.number_input("Smoothing Tolerance (Meters)", value=100)
-                        if st.button("Run Smooth", type="primary"):
-                            try:
-                                with st.spinner("Smoothing lines..."):
-                                    out_path = os.path.join(temp_dir, "smoothed.shp")
-                                    arcpy.cartography.SmoothLine(shp_path, out_path, "PAEK", tol)
-                                    
-                                    # Zip result (Shapefile components)
-                                    base = os.path.splitext(out_path)[0]
-                                    zip_mem = BytesIO()
-                                    with ZipFile(zip_mem, 'w') as z:
-                                        for ext in ['.shp', '.shx', '.dbf', '.prj']:
-                                            if os.path.exists(base + ext):
-                                                z.write(base + ext, os.path.basename(base + ext))
-                                    zip_mem.seek(0)
-                                    
-                                    st.download_button("Download Smoothed Shapefile", zip_mem, "smoothed.zip", "application/zip")
-                            except Exception as e:
-                                st.error(f"ArcPy Error: {e}")
-                                
-                    elif arc_tool == "Count Features":
-                        if st.button("Count", type="primary"):
-                            try:
-                                count = arcpy.management.GetCount(shp_path)
-                                st.metric("Feature Count", str(count))
-                            except Exception as e:
-                                st.error(f"Error: {e}")
-
-                    st.markdown("</div>", unsafe_allow_html=True)
-            else:
-                st.error("No Shapefile found in the uploaded Zip.")
-
 def main():
     # Sidebar Navigation
     with st.sidebar:
@@ -951,13 +937,22 @@ def main():
 
         st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
         mode = st.radio("Modules", 
-                       ["📥 Admin Downloader", "🔄 Converter", "🧮 Vector Calculator", "🛠️ ArcPy Toolbox (Local Only)"],
+                       ["📥 Admin Downloader", "🔄 Converter", "🧮 Vector Calculator"],
                        label_visibility="collapsed")
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
         st.markdown("**Quick Info**")
         st.caption("Convert, transform, and analyze geospatial vector data.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
+        st.markdown("**Supported Formats**")
+        st.markdown("- Shapefile (SHP)")
+        st.markdown("- GeoJSON")
+        st.markdown("- KML")
+        st.markdown("- GeoPackage (GPKG)")
+        st.markdown("- CSV / Excel")
         st.markdown("</div>", unsafe_allow_html=True)
 
     # Main Content
@@ -967,8 +962,6 @@ def main():
         view_data_converter()
     elif mode == "🧮 Vector Calculator":
         view_vector_calculator()
-    elif mode == "🛠️ ArcPy Toolbox (Local Only)":
-        view_arcpy_toolbox()
 
     # Footer
     st.divider()
