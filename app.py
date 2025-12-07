@@ -9,6 +9,7 @@ import requests
 from zipfile import ZipFile
 from io import BytesIO
 from shapely import wkt
+import shapely
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(
@@ -22,13 +23,17 @@ st.set_page_config(
 fiona.drvsupport.supported_drivers['KML'] = 'rw'
 fiona.drvsupport.supported_drivers['LIBKML'] = 'rw'
 
-# Session State
+# Session State Initialization
 if 'calc_result_gdf' not in st.session_state:
     st.session_state['calc_result_gdf'] = None
 if 'calc_result_name' not in st.session_state:
     st.session_state['calc_result_name'] = "result"
+if 'input_gdf' not in st.session_state:
+    st.session_state['input_gdf'] = None
+if 'overlay_gdf' not in st.session_state:
+    st.session_state['overlay_gdf'] = None
 
-# --- 2. CLEAN MINIMALIST STYLING (Card-based with Accent Blue) ---
+# --- 2. CLEAN MINIMALIST STYLING ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap');
@@ -69,6 +74,24 @@ st.markdown("""
         line-height: 1.6;
         margin: 0.5rem 0;
     }
+    
+    .guideline-box {
+        background-color: #f8f9fa;
+        border-radius: 4px;
+        padding: 1rem;
+        font-size: 0.9rem;
+        border: 1px solid #e9ecef;
+        margin-bottom: 1rem;
+    }
+    
+    .guideline-header {
+        font-weight: 600;
+        color: #0068C9;
+        margin-bottom: 0.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
 
     @media (prefers-color-scheme: dark) {
         .minimal-card {
@@ -80,6 +103,11 @@ st.markdown("""
         }
         .minimal-card p {
             color: #CCCCCC;
+        }
+        .guideline-box {
+            background-color: #262730;
+            border-color: #363945;
+            color: #FAFAFA;
         }
     }
 
@@ -232,7 +260,7 @@ st.markdown("""
         border-left: 3px solid #0068C9;
         padding-left: 0.75rem;
     }
-
+    
     /* === COLUMNS PADDING === */
     [data-testid="column"] {
         padding: 0 0.5rem;
@@ -391,6 +419,14 @@ def handle_export(gdf, output_format, file_prefix="export"):
             st.error(f"Export failed: {str(e)}")
             return None, None, None
 
+def render_guideline(title, content):
+    st.markdown(f"""
+    <div class="guideline-box">
+        <div class="guideline-header">💡 Guideline: {title}</div>
+        {content}
+    </div>
+    """, unsafe_allow_html=True)
+
 # --- 5. MODULES ---
 
 def view_admin_downloader():
@@ -402,6 +438,16 @@ def view_admin_downloader():
         Select your desired level, filter by state/district, and download in your preferred format.</p>
     </div>
     """, unsafe_allow_html=True)
+
+    with st.expander("📖 User Guide: How to use the Downloader"):
+        st.markdown("""
+        1.  **Select Granularity:** Choose between States, Districts, Subdistricts (Tehsils), or Villages.
+        2.  **Filter Data:** Depending on the granularity, use the dropdown menus to narrow down the specific region you need.
+        3.  **Choose Format:** Select a GIS format (Shapefile, GeoJSON, KML, or GeoPackage).
+        4.  **Download:** Click the button to process and download the file.
+        
+        *Note: Village maps are large files and may take a moment to process.*
+        """)
 
     col_left, col_right = st.columns([1.3, 1.7], gap="large")
 
@@ -549,6 +595,14 @@ def view_data_converter():
     </div>
     """, unsafe_allow_html=True)
 
+    with st.expander("📖 User Guide: How to convert data"):
+        st.markdown("""
+        1.  **Upload:** Drop a file (Zip containing Shapefile, GeoJSON, KML, CSV, or Excel).
+        2.  **CSV/Excel Handling:** If uploading tabular data, you must specify which columns contain Latitude/Longitude or WKT (Well-Known Text) geometry.
+        3.  **Coordinate Reference System (CRS):** You can optionally reproject the data to a new system (e.g., EPSG:3857 for web mapping).
+        4.  **Convert:** Select the target format and download the result.
+        """)
+
     st.markdown('<div class="minimal-card"><h3>Step 1: Upload File</h3>', unsafe_allow_html=True)
 
     uploaded_file = st.file_uploader(
@@ -575,8 +629,8 @@ def view_data_converter():
                     c1, c2, c3 = st.columns(3)
                     mode = c1.radio("Type", ["Lat/Lon", "WKT"], label_visibility="collapsed")
                     if mode == "Lat/Lon":
-                        x = c2.selectbox("Lon", df.columns, label_visibility="collapsed")
-                        y = c3.selectbox("Lat", df.columns, label_visibility="collapsed")
+                        x = c2.selectbox("Lon", df.columns, label_visibility="collapsed", help="Select Longitude Column")
+                        y = c3.selectbox("Lat", df.columns, label_visibility="collapsed", help="Select Latitude Column")
                         if st.button("Create Geometry", type="primary"):
                             gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df[x], df[y]), crs="EPSG:4326")
                     else:
@@ -597,8 +651,8 @@ def view_data_converter():
                 with col_convert:
                     st.markdown('<div class="minimal-card"><h3>Step 2: Configure Conversion</h3>', unsafe_allow_html=True)
 
-                    enable_crs = st.checkbox("Transform CRS")
-                    target_epsg = st.number_input("EPSG Code", value=4326, disabled=not enable_crs)
+                    enable_crs = st.checkbox("Transform CRS (Reprojection)", help="Check this to change the coordinate system.")
+                    target_epsg = st.number_input("EPSG Code", value=4326, disabled=not enable_crs, help="Enter the target EPSG code (e.g., 4326 for WGS84, 3857 for Web Mercator).")
                     target_format = st.selectbox("Output Format", ["ESRI Shapefile (.zip)", "GeoJSON", "GeoPackage (.gpkg)", "KML"], label_visibility="collapsed")
 
                     if enable_crs and st.button("Apply CRS Transform", type="secondary"):
@@ -631,18 +685,27 @@ def view_vector_calculator():
 
     st.markdown("""
     <div class="minimal-card">
-        <p>Perform spatial analysis and geoprocessing operations on vector data.</p>
+        <p>Perform advanced spatial analysis and geoprocessing operations. 
+        Features include Overlay analysis, Spatial Joins, and Topology repairs.</p>
     </div>
     """, unsafe_allow_html=True)
+    
+    with st.expander("📖 User Guide: Vector Calculator"):
+        st.markdown("""
+        1.  **Input Data:** Upload your primary vector layer (Points, Lines, or Polygons).
+        2.  **Processing Tools:** Select a category (Geoprocessing, Analysis, Overlay, etc.).
+        3.  **Parameters:** Configure the specific tool (e.g., buffer distance in degrees).
+        4.  **Results:** View the output on the map and export it in your desired format.
+        
+        *Tip: For Overlay and Spatial Join tools, you will need to upload a secondary layer.*
+        """)
 
-    tab1, tab2, tab3 = st.tabs(["Input Data", "Processing Tools", "Results"])
+    tab1, tab2, tab3 = st.tabs(["1. Input Data", "2. Processing Tools", "3. Results"])
 
     with tab1:
-        st.markdown('<div class="minimal-card"><h3>Upload Layer</h3>', unsafe_allow_html=True)
+        st.markdown('<div class="minimal-card"><h3>Primary Layer</h3>', unsafe_allow_html=True)
+        uploaded_file = st.file_uploader("Upload Primary Layer", type=['zip', 'shp', 'geojson', 'kml', 'gpkg'], label_visibility="collapsed", key="primary_up")
 
-        uploaded_file = st.file_uploader("Choose file", type=['zip', 'shp', 'geojson', 'kml', 'gpkg'], label_visibility="collapsed")
-
-        input_gdf = None
         if uploaded_file:
             with tempfile.TemporaryDirectory() as tmp_dir:
                 file_path = os.path.join(tmp_dir, uploaded_file.name)
@@ -655,33 +718,59 @@ def view_vector_calculator():
 
                     if input_gdf is not None:
                         st.session_state['input_gdf'] = input_gdf
-                        st.success(f"Loaded: {len(input_gdf)} features")
+                        st.success(f"Primary Layer Loaded: {len(input_gdf)} features")
                 except Exception as e:
                     st.error(f"Error: {e}")
-        elif 'input_gdf' in st.session_state:
-            input_gdf = st.session_state['input_gdf']
-            st.info(f"Using layer: {len(input_gdf)} features")
+        
+        if st.session_state['input_gdf'] is not None:
+             st.info(f"Active Primary Layer: {len(st.session_state['input_gdf'])} features")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+        
+        # Secondary Layer Uploader for Overlay/Join
+        st.markdown('<div class="minimal-card"><h3>Secondary Layer (Optional)</h3>', unsafe_allow_html=True)
+        st.caption("Required only for Overlay and Spatial Join operations.")
+        uploaded_overlay = st.file_uploader("Upload Secondary Layer", type=['zip', 'shp', 'geojson', 'kml', 'gpkg'], label_visibility="collapsed", key="sec_up")
+        
+        if uploaded_overlay:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                file_path = os.path.join(tmp_dir, uploaded_overlay.name)
+                with open(file_path, "wb") as f: f.write(uploaded_overlay.getbuffer())
+                try:
+                    if file_path.endswith('.zip'):
+                        overlay_gdf = extract_and_read_first(file_path, tmp_dir)
+                    else:
+                        overlay_gdf = gpd.read_file(file_path)
+                    
+                    if overlay_gdf is not None:
+                        st.session_state['overlay_gdf'] = overlay_gdf
+                        st.success(f"Secondary Layer Loaded: {len(overlay_gdf)} features")
+                except Exception as e:
+                    st.error(f"Error loading secondary layer: {e}")
 
         st.markdown("</div>", unsafe_allow_html=True)
 
     with tab2:
-        if 'input_gdf' in st.session_state:
+        if 'input_gdf' in st.session_state and st.session_state['input_gdf'] is not None:
             gdf = st.session_state['input_gdf']
+            sec_gdf = st.session_state.get('overlay_gdf')
 
             col_tool, col_param = st.columns([1, 1.5], gap="large")
 
             with col_tool:
                 st.markdown('<div class="minimal-card"><h3>Tool Selection</h3>', unsafe_allow_html=True)
 
-                category = st.selectbox("Category", ["Geoprocessing", "Geometry", "Analysis", "Data Management"], label_visibility="collapsed")
+                category = st.selectbox("Category", ["Geoprocessing", "Geometry", "Analysis", "Overlay Operations", "Data Management"], label_visibility="collapsed")
 
                 tool_options = []
                 if category == "Geoprocessing":
                     tool_options = ["Buffer", "Convex Hull", "Dissolve"]
                 elif category == "Geometry":
-                    tool_options = ["Centroids", "Simplify", "Explode"]
+                    tool_options = ["Centroids", "Simplify", "Explode", "Fix Geometries"]
                 elif category == "Analysis":
                     tool_options = ["Statistics", "Bounding Box", "Mean Coordinate"]
+                elif category == "Overlay Operations":
+                    tool_options = ["Intersection", "Difference", "Union", "Spatial Join"]
                 elif category == "Data Management":
                     tool_options = ["Reproject", "Merge"]
 
@@ -694,38 +783,54 @@ def view_vector_calculator():
                 res_gdf = None
 
                 try:
+                    # --- Geoprocessing ---
                     if tool == "Buffer":
+                        render_guideline("Buffer", "Creates a polygon surrounding the geometry at a specified distance. Distance units depend on the CRS (e.g., degrees for WGS84, meters for UTM).")
                         dist = st.number_input("Distance (units)", value=0.01, format="%.6f")
                         if st.button("Execute Buffer", type="primary", use_container_width=True):
                             res_gdf = gdf.copy()
                             res_gdf['geometry'] = res_gdf.geometry.buffer(dist)
 
                     elif tool == "Convex Hull":
+                        render_guideline("Convex Hull", "Creates the smallest convex polygon that encloses all points in the geometry (like wrapping a rubber band around nails).")
                         if st.button("Execute Convex Hull", type="primary", use_container_width=True):
                             res_gdf = gdf.copy()
                             res_gdf['geometry'] = res_gdf.geometry.convex_hull
 
                     elif tool == "Dissolve":
+                        render_guideline("Dissolve", "Aggregates features based on a specific attribute. Similar to 'Group By' in SQL.")
                         col = st.selectbox("Field", ["All"] + list(gdf.columns), label_visibility="collapsed")
                         if st.button("Execute Dissolve", type="primary", use_container_width=True):
                             res_gdf = gdf.dissolve() if col == "All" else gdf.dissolve(by=col)
 
+                    # --- Geometry ---
                     elif tool == "Centroids":
+                        render_guideline("Centroids", "Converts polygons or lines into a single point representing the geometric center.")
                         if st.button("Calculate Centroids", type="primary", use_container_width=True):
                             res_gdf = gdf.copy()
                             res_gdf['geometry'] = res_gdf.geometry.centroid
 
                     elif tool == "Simplify":
+                        render_guideline("Simplify", "Reduces the number of vertices in a geometry while preserving its shape (Douglas-Peucker algorithm).")
                         tol = st.number_input("Tolerance", value=0.001, format="%.6f")
                         if st.button("Execute Simplify", type="primary", use_container_width=True):
                             res_gdf = gdf.copy()
                             res_gdf['geometry'] = res_gdf.geometry.simplify(tol)
-
+                            
                     elif tool == "Explode":
+                        render_guideline("Explode", "Separates Multipart features (e.g., a set of islands stored as one row) into Singlepart features (one row per island).")
                         if st.button("Execute Explode", type="primary", use_container_width=True):
                             res_gdf = gdf.explode(index_parts=True).reset_index(drop=True)
 
+                    elif tool == "Fix Geometries":
+                        render_guideline("Fix Geometries", "Attempts to repair invalid geometries (e.g., self-intersections) by applying a zero-distance buffer.")
+                        if st.button("Execute Repair", type="primary", use_container_width=True):
+                            res_gdf = gdf.copy()
+                            res_gdf['geometry'] = res_gdf.geometry.buffer(0)
+
+                    # --- Analysis ---
                     elif tool == "Statistics":
+                        render_guideline("Statistics", "Calculates basic geometric properties like Area and Perimeter.")
                         if st.button("Calculate Stats", type="primary", use_container_width=True):
                             res_gdf = gdf.copy()
                             res_gdf['area'] = res_gdf.geometry.area
@@ -733,36 +838,72 @@ def view_vector_calculator():
                             st.dataframe(res_gdf[['area', 'perimeter']].describe(), use_container_width=True)
 
                     elif tool == "Bounding Box":
+                        render_guideline("Bounding Box", "Creates a rectangular box representing the maximum extents of each feature.")
                         if st.button("Generate BBox", type="primary", use_container_width=True):
                             res_gdf = gdf.copy()
                             res_gdf['geometry'] = res_gdf.geometry.envelope
 
                     elif tool == "Mean Coordinate":
+                        render_guideline("Mean Coordinate", "Calculates the average X and Y center of all features combined.")
                         if st.button("Calculate Mean", type="primary", use_container_width=True):
                             x = gdf.geometry.centroid.x.mean()
                             y = gdf.geometry.centroid.y.mean()
                             res_gdf = gpd.GeoDataFrame({'geometry': gpd.points_from_xy([x], [y])}, crs=gdf.crs)
 
+                    # --- Overlay Operations (Replaces Advanced GIS Tools) ---
+                    elif tool in ["Intersection", "Difference", "Union", "Spatial Join"]:
+                        if sec_gdf is None:
+                            st.error("⚠️ Secondary Layer required for Overlay operations. Please upload it in the 'Input Data' tab.")
+                        else:
+                            # Ensure CRS match
+                            if gdf.crs != sec_gdf.crs:
+                                st.warning(f"CRS Mismatch detected. Reprojecting Secondary Layer to match Primary ({gdf.crs}).")
+                                sec_gdf = sec_gdf.to_crs(gdf.crs)
+
+                            if tool == "Intersection":
+                                render_guideline("Intersection", "Returns the area common to both layers (AND operation).")
+                                if st.button("Run Intersection", type="primary"):
+                                    res_gdf = gpd.overlay(gdf, sec_gdf, how='intersection')
+                            
+                            elif tool == "Difference":
+                                render_guideline("Difference", "Subtracts the Secondary Layer area from the Primary Layer (NOT operation).")
+                                if st.button("Run Difference", type="primary"):
+                                    res_gdf = gpd.overlay(gdf, sec_gdf, how='difference')
+                                    
+                            elif tool == "Union":
+                                render_guideline("Union", "Combines all features from both layers (OR operation).")
+                                if st.button("Run Union", type="primary"):
+                                    res_gdf = gpd.overlay(gdf, sec_gdf, how='union')
+
+                            elif tool == "Spatial Join":
+                                render_guideline("Spatial Join", "Joins attributes from the Secondary Layer to the Primary Layer based on spatial location.")
+                                op = st.selectbox("Join Predicate", ["intersects", "contains", "within"], index=0)
+                                if st.button("Run Spatial Join", type="primary"):
+                                    res_gdf = gpd.sjoin(gdf, sec_gdf, how="inner", predicate=op)
+
+                    # --- Data Management ---
                     elif tool == "Reproject":
-                        epsg = st.number_input("EPSG Code", value=3857)
+                        render_guideline("Reproject", "Transforms data to a new Coordinate Reference System (EPSG code).")
+                        epsg = st.number_input("Target EPSG Code", value=3857)
                         if st.button("Execute Reproject", type="primary", use_container_width=True):
                             res_gdf = gdf.to_crs(epsg=epsg)
 
                     elif tool == "Merge":
+                        render_guideline("Merge", "Duplicates the current layer and appends it to itself (demonstration of appending data).")
                         if st.button("Execute Merge", type="primary", use_container_width=True):
                             res_gdf = pd.concat([gdf, gdf])
 
                     if res_gdf is not None:
                         st.session_state['calc_result_gdf'] = res_gdf
                         st.session_state['calc_result_name'] = f"{tool}_Result"
-                        st.success("Complete!")
+                        st.success("Processing Complete! Go to 'Results' tab to download.")
 
                 except Exception as e:
-                    st.error(f"Error: {e}")
+                    st.error(f"Processing Error: {e}")
 
                 st.markdown("</div>", unsafe_allow_html=True)
         else:
-            st.info("Upload data first")
+            st.info("Please upload a Primary Layer in the 'Input Data' tab first.")
 
     with tab3:
         if st.session_state['calc_result_gdf'] is not None:
@@ -774,7 +915,7 @@ def view_vector_calculator():
             try:
                 st.map(res_gdf.to_crs(4326) if res_gdf.crs else res_gdf)
             except:
-                st.warning("Cannot visualize")
+                st.warning("Cannot visualize result (likely non-spatial or empty).")
 
             col1, col2 = st.columns(2)
             with col1:
@@ -786,7 +927,7 @@ def view_vector_calculator():
 
             st.markdown("</div>", unsafe_allow_html=True)
         else:
-            st.info("No results to export")
+            st.info("No results generated yet.")
 
 def main():
     # Sidebar Navigation
@@ -802,7 +943,7 @@ def main():
 
         st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
         st.markdown("**Quick Info**")
-        st.caption("Convert and transform geospatial vector data across multiple formats.")
+        st.caption("Convert, transform, and analyze geospatial vector data.")
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
