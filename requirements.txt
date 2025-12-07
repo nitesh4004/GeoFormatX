@@ -6,5 +6,5 @@ shapely
 pyproj
 openpyxl
 gdown
-arcpy
+
 
