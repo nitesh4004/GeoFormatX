@@ -31,41 +31,43 @@ for k in keys:
     if k not in st.session_state:
         st.session_state[k] = None
 
-# --- 2. COMPACT & CLEAN STYLING ---
+# --- 2. COMPACT & CLEAN STYLING (FIXED CLIPPING) ---
 st.markdown("""
     <style>
-    /* 1. COMPACT CONTAINER */
+    /* 1. FIX CLIPPING: Increase padding-top so text doesn't hide behind the top bar */
     .block-container {
-        padding-top: 1.5rem !important; /* Tighter top padding */
+        padding-top: 3.5rem !important; /* Increased from 1.5rem to 3.5rem */
         padding-bottom: 1rem !important;
-        max-width: 95% !important; /* Use more screen width */
+        max-width: 95% !important;
     }
     
-    /* 2. SIDEBAR TITLE (Balanced Size) */
+    /* 2. SIDEBAR TITLE (Large & Colorful) */
     [data-testid="stSidebar"] h1 {
-        font-size: 2.2rem !important; /* Reduced from 3rem to look more professional */
+        font-size: 2.5rem !important; 
         font-weight: 800 !important;
         background: -webkit-linear-gradient(45deg, #0068C9, #00E5FF);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         margin-bottom: 0.5rem !important;
         margin-top: 0.5rem !important;
+        line-height: 1.2 !important;
     }
 
-    /* 3. SECTION HEADERS (Clean & Compact) */
+    /* 3. SECTION HEADERS (Feature Names like "Administrative Boundaries") */
     h2 {
-        font-size: 1.3rem !important; /* Cleaner size */
+        font-size: 1.5rem !important;
         font-weight: 600 !important;
-        padding-top: 5px !important;
+        margin-top: 0rem !important; 
         margin-bottom: 0.5rem !important;
-        border-bottom: 1px solid rgba(128,128,128,0.2); /* Subtle separator line */
+        border-bottom: 1px solid rgba(128,128,128,0.2);
         padding-bottom: 5px;
+        line-height: 1.5 !important; /* Fix line height clipping */
     }
 
     /* 4. METRIC CARDS (Compact) */
     div[data-testid="stMetric"] {
         background-color: var(--secondary-background-color); 
-        padding: 10px 15px; /* Less padding */
+        padding: 10px 15px;
         border-radius: 6px;
         border-left: 4px solid #0068C9;
         box-shadow: 0 1px 2px rgba(0,0,0,0.05);
@@ -74,7 +76,7 @@ st.markdown("""
     
     /* 5. REDUCE VERTICAL GAPS */
     div[data-testid="column"] {
-        gap: 0.5rem; /* Closer columns */
+        gap: 0.5rem;
     }
 
     /* MAP BORDER */
@@ -181,7 +183,6 @@ def convert_crs(gdf, target_epsg):
 def render_map(gdf_list, height=550):
     """
     Renders interactive Folium map with Google Hybrid tiles.
-    Reduced height slightly for better fit.
     """
     if not gdf_list or gdf_list[0][0] is None:
         m = folium.Map(location=[20.5937, 78.9629], zoom_start=4, tiles=None)
@@ -293,7 +294,7 @@ def main():
 
     # --- 1. ADMIN DOWNLOADER MODULE ---
     if selected == "Admin Data":
-        st.markdown("## 🏛️ Administrative Boundaries") # H2 - Compact size
+        st.markdown("## 🏛️ Administrative Boundaries") # H2 - Fix clipping
         
         col_ctrl, col_map = st.columns([1, 2.5], gap="medium")
         
