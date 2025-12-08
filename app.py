@@ -31,33 +31,36 @@ for k in keys:
     if k not in st.session_state:
         st.session_state[k] = None
 
-# --- 2. UI STYLING ---
+# --- 2. DUAL-MODE ADAPTIVE STYLING ---
+# We use var(--variable) to let Streamlit handle the colors automatically
 st.markdown("""
     <style>
-    /* Clean Header */
+    /* Remove top padding for cleaner look */
     .block-container {
         padding-top: 1rem;
         padding-bottom: 0rem;
     }
-    /* Metric Cards */
+    
+    /* ADAPTIVE METRIC CARDS */
     div[data-testid="stMetric"] {
-        background-color: #f8f9fa;
-        padding: 10px;
+        background-color: var(--secondary-background-color); /* Auto-adapts to dark/light */
+        padding: 15px;
         border-radius: 8px;
-        border-left: 4px solid #0068C9;
+        border-left: 5px solid #0068C9; /* Consistent Accent Color */
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        color: var(--text-color);
     }
-    /* Dark mode metrics */
-    @media (prefers-color-scheme: dark) {
-        div[data-testid="stMetric"] {
-            background-color: #262730;
-            border-left: 4px solid #4da6ff;
-        }
-    }
-    /* Map Border */
+
+    /* MAP BORDER */
     iframe {
         border-radius: 8px;
-        border: 1px solid #ddd;
+        border: 1px solid rgba(128, 128, 128, 0.2); /* Subtle border visible in both modes */
+    }
+    
+    /* CUSTOM TOAST */
+    div[data-testid="stToast"] {
+        background-color: var(--secondary-background-color);
+        color: var(--text-color);
     }
     </style>
 """, unsafe_allow_html=True)
@@ -166,9 +169,11 @@ def render_map(gdf_list, height=600):
     center_lat = (bounds[1] + bounds[3]) / 2
     center_lon = (bounds[0] + bounds[2]) / 2
 
+    # Using 'CartoDB positron' as base - it's neutral and works well for overlays in both dark/light contexts
+    # Alternatives like 'CartoDB dark_matter' are too dark for standard presentations
     m = folium.Map(location=[center_lat, center_lon], zoom_start=6, tiles="CartoDB positron")
     
-    # Add Satellite View
+    # Add Satellite View (Good for context in dark mode)
     folium.TileLayer(
         tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
         attr='Google',
@@ -177,18 +182,22 @@ def render_map(gdf_list, height=600):
         control=True
     ).add_to(m)
 
-    # Add Layers
+    # Add Layers with High Contrast Colors
     for gdf, name, color in gdf_list:
         if gdf is not None:
             if gdf.crs != "EPSG:4326": gdf = gdf.to_crs(epsg=4326)
             
-            # Simplified tooltip to avoid clutter
             tooltip_cols = list(gdf.columns[:3]) if len(gdf.columns) > 0 else None
             
             folium.GeoJson(
                 gdf,
                 name=name,
-                style_function=lambda x, color=color: {'fillColor': color, 'color': color, 'weight': 2, 'fillOpacity': 0.4},
+                style_function=lambda x, color=color: {
+                    'fillColor': color, 
+                    'color': color, 
+                    'weight': 2, 
+                    'fillOpacity': 0.5 # Increased opacity for visibility
+                },
                 tooltip=folium.GeoJsonTooltip(fields=tooltip_cols) if tooltip_cols else None
             ).add_to(m)
 
@@ -244,15 +253,16 @@ def main():
         st.title("GeoFormatX")
         st.caption("Professional Geospatial Suite v5.0")
         
+        # Transparent background for container to adapt to sidebar color
         selected = option_menu(
             menu_title=None,
             options=["Admin Data", "Rivers", "Converter", "Vector Calculator"],
             icons=["building", "water", "arrow-repeat", "calculator"],
             default_index=0,
             styles={
-                "container": {"padding": "0!important", "background-color": "#fafafa"},
-                "icon": {"color": "#666", "font-size": "18px"}, 
-                "nav-link": {"font-size": "15px", "text-align": "left", "margin":"0px", "--hover-color": "#eee"},
+                "container": {"padding": "0!important", "background-color": "transparent"},
+                "icon": {"color": "orange", "font-size": "18px"}, 
+                "nav-link": {"font-size": "15px", "text-align": "left", "margin":"0px", "--hover-color": "var(--secondary-background-color)"},
                 "nav-link-selected": {"background-color": "#0068C9", "color": "white"},
             }
         )
@@ -338,6 +348,7 @@ def main():
                         
         with col_map:
             current_data = locals().get('final_selection', st.session_state['main_gdf'])
+            # Use Blue (#3388ff) which is visible on both light/dark maps
             render_map([(current_data, "Admin Boundary", "#3388ff")])
             
             if current_data is not None:
@@ -389,6 +400,7 @@ def main():
                     st.info("Click 'Load River Database' to begin.")
         
         with col_map:
+            # Use Strong Blue for Rivers
             render_map([(selected_river, "River Flow", "#0068C9")])
 
 
@@ -450,6 +462,7 @@ def main():
                         if d: st.download_button("Download Result", d, f"converted{e}", m, use_container_width=True)
             
             with col_map:
+                # Use Red (#FF4B4B) for user uploads to distinguish from standard data
                 render_map([(gdf, "Converted Data", "#FF4B4B")])
 
     # --- 4. VECTOR CALCULATOR MODULE (FULL FEATURES) ---
@@ -553,7 +566,10 @@ def main():
                             st.error(f"Processing Error: {e}")
 
         with col_map:
-            # Map Rendering Logic
+            # Color Logic:
+            # Layer A: Gray (Neutral)
+            # Layer B: Orange (Distinct from result)
+            # Result: Green (Success/Output)
             layers = []
             if st.session_state['main_gdf'] is not None: layers.append((st.session_state['main_gdf'], "Layer A", "gray"))
             if st.session_state['secondary_gdf'] is not None: layers.append((st.session_state['secondary_gdf'], "Layer B", "orange"))
