@@ -6,5 +6,7 @@ shapely
 pyproj
 openpyxl
 gdown
-
+streamlit-folium
+folium
+streamlit-option-menu
 
