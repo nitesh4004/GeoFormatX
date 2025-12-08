@@ -31,43 +31,50 @@ for k in keys:
     if k not in st.session_state:
         st.session_state[k] = None
 
-# --- 2. DUAL-MODE ADAPTIVE STYLING ---
+# --- 2. COMPACT & CLEAN STYLING ---
 st.markdown("""
     <style>
-    /* 1. FIX CLIPPING & SPACING */
+    /* 1. COMPACT CONTAINER */
     .block-container {
-        padding-top: 2.5rem !important; /* Increased to prevent top text clipping */
-        padding-bottom: 1rem;
+        padding-top: 1.5rem !important; /* Tighter top padding */
+        padding-bottom: 1rem !important;
+        max-width: 95% !important; /* Use more screen width */
     }
     
-    /* 2. SIDEBAR TITLE (APP NAME) - INCREASE SIZE */
+    /* 2. SIDEBAR TITLE (Balanced Size) */
     [data-testid="stSidebar"] h1 {
-        font-size: 3rem !important; /* Much larger */
+        font-size: 2.2rem !important; /* Reduced from 3rem to look more professional */
         font-weight: 800 !important;
         background: -webkit-linear-gradient(45deg, #0068C9, #00E5FF);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        padding-top: 1rem !important;
-        margin-bottom: 1rem !important;
-    }
-
-    /* 3. CONTENT HEADERS (e.g., "Administrative Boundaries") - REDUCE SIZE */
-    h2 {
-        font-size: 1.5rem !important; /* Reduced size */
-        font-weight: 600 !important;
-        padding-top: 10px !important; /* Extra padding to stop black line clipping */
         margin-bottom: 0.5rem !important;
-        line-height: 1.4 !important; /* Better line spacing */
+        margin-top: 0.5rem !important;
     }
 
-    /* ADAPTIVE METRIC CARDS */
+    /* 3. SECTION HEADERS (Clean & Compact) */
+    h2 {
+        font-size: 1.3rem !important; /* Cleaner size */
+        font-weight: 600 !important;
+        padding-top: 5px !important;
+        margin-bottom: 0.5rem !important;
+        border-bottom: 1px solid rgba(128,128,128,0.2); /* Subtle separator line */
+        padding-bottom: 5px;
+    }
+
+    /* 4. METRIC CARDS (Compact) */
     div[data-testid="stMetric"] {
         background-color: var(--secondary-background-color); 
-        padding: 15px;
-        border-radius: 8px;
-        border-left: 5px solid #0068C9;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        padding: 10px 15px; /* Less padding */
+        border-radius: 6px;
+        border-left: 4px solid #0068C9;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
         color: var(--text-color);
+    }
+    
+    /* 5. REDUCE VERTICAL GAPS */
+    div[data-testid="column"] {
+        gap: 0.5rem; /* Closer columns */
     }
 
     /* MAP BORDER */
@@ -171,16 +178,14 @@ def convert_crs(gdf, target_epsg):
     if gdf.crs is None: gdf.set_crs(epsg=4326, inplace=True)
     return gdf.to_crs(epsg=target_epsg)
 
-def render_map(gdf_list, height=600):
+def render_map(gdf_list, height=550):
     """
     Renders interactive Folium map with Google Hybrid tiles.
-    gdf_list: list of tuples (gdf, layer_name, color)
+    Reduced height slightly for better fit.
     """
     if not gdf_list or gdf_list[0][0] is None:
-        # Default view of India
         m = folium.Map(location=[20.5937, 78.9629], zoom_start=4, tiles=None)
     else:
-        # Center map on first layer
         first_gdf = gdf_list[0][0]
         if first_gdf.crs != "EPSG:4326": 
             first_gdf = first_gdf.to_crs(epsg=4326)
@@ -191,16 +196,15 @@ def render_map(gdf_list, height=600):
         
         m = folium.Map(location=[center_lat, center_lon], zoom_start=6, tiles=None)
 
-    # Add Google Hybrid Layer (Satellite + Roads/Labels)
+    # Google Hybrid Layer
     folium.TileLayer(
-        tiles='https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', # lyrs=y for Hybrid
+        tiles='https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', 
         attr='Google',
         name='Google Hybrid',
         overlay=False,
         control=True
     ).add_to(m)
 
-    # Add Layers
     for gdf, name, color in gdf_list:
         if gdf is not None:
             if gdf.crs != "EPSG:4326": gdf = gdf.to_crs(epsg=4326)
@@ -268,10 +272,9 @@ def handle_export(gdf, output_format, file_prefix="export"):
 def main():
     # --- NAVIGATION SIDEBAR ---
     with st.sidebar:
-        st.title("GeoFormatX") # Now targets h1 in sidebar with larger font
+        st.title("GeoFormatX") # Targets H1 CSS
         st.caption("Professional Geospatial Suite v5.0")
         
-        # Transparent background for container to adapt to sidebar color
         selected = option_menu(
             menu_title=None,
             options=["Admin Data", "Rivers", "Converter", "Vector Calculator"],
@@ -286,11 +289,11 @@ def main():
         )
         st.divider()
         st.markdown("**User Guide**")
-        st.info("💡 Map set to Google Hybrid (Satellite + Labels).")
+        st.info("💡 Map set to Google Hybrid.")
 
     # --- 1. ADMIN DOWNLOADER MODULE ---
     if selected == "Admin Data":
-        st.markdown("## 🏛️ Administrative Boundaries") # H2 - Reduced size via CSS
+        st.markdown("## 🏛️ Administrative Boundaries") # H2 - Compact size
         
         col_ctrl, col_map = st.columns([1, 2.5], gap="medium")
         
@@ -299,7 +302,6 @@ def main():
                 st.subheader("1. Select Source")
                 source_type = st.selectbox("Granularity", ["Districts", "Subdistricts", "Villages", "States"])
                 
-                # Dynamic Logic for Village States
                 target_state_key = None
                 if source_type == "Villages":
                     available_states = sorted(list(STATE_VILLAGE_IDS.keys()))
@@ -327,7 +329,6 @@ def main():
                         else:
                             st.error("Failed to load data.")
 
-            # Filtering & Export
             if st.session_state['main_gdf'] is not None:
                 gdf = st.session_state['main_gdf']
                 with st.container(border=True):
@@ -366,8 +367,7 @@ def main():
                         
         with col_map:
             current_data = locals().get('final_selection', st.session_state['main_gdf'])
-            # Use Bright Blue (#3388ff) which contrasts well against Hybrid Map
-            render_map([(current_data, "Admin Boundary", "#3388ff")])
+            render_map([(current_data, "Admin Boundary", "#3388ff")], height=550)
             
             if current_data is not None:
                 with st.expander("📊 View Attribute Table"):
@@ -418,15 +418,13 @@ def main():
                     st.info("Click 'Load River Database' to begin.")
         
         with col_map:
-            # Use Cyan (#00E5FF) for Rivers to pop against Satellite background
-            render_map([(selected_river, "River Flow", "#00E5FF")])
+            render_map([(selected_river, "River Flow", "#00E5FF")], height=550)
 
 
     # --- 3. FORMAT CONVERTER MODULE ---
     elif selected == "Converter":
         st.markdown("## 🔄 Universal Format Converter")
         
-        # File Upload Section
         with st.container(border=True):
             uploaded_file = st.file_uploader("Upload File (Zip, SHP, KML, GPKG, CSV, XLSX)", type=['zip', 'shp', 'geojson', 'kml', 'gpkg', 'csv', 'xlsx'])
         
@@ -480,17 +478,15 @@ def main():
                         if d: st.download_button("Download Result", d, f"converted{e}", m, use_container_width=True)
             
             with col_map:
-                # Use Red (#FF4B4B) - visible on hybrid
-                render_map([(gdf, "Converted Data", "#FF4B4B")])
+                render_map([(gdf, "Converted Data", "#FF4B4B")], height=550)
 
-    # --- 4. VECTOR CALCULATOR MODULE (FULL FEATURES) ---
+    # --- 4. VECTOR CALCULATOR MODULE ---
     elif selected == "Vector Calculator":
         st.markdown("## 🧮 Vector Operations")
         
         col_ctrl, col_map = st.columns([1.2, 2.5], gap="large")
         
         with col_ctrl:
-            # 1. INPUTS
             with st.expander("📂 1. Data Layers (Input)", expanded=True):
                 f1 = st.file_uploader("Layer A (Primary)", type=['zip', 'geojson', 'kml', 'gpkg'], key="f1")
                 f2 = st.file_uploader("Layer B (Overlay/Secondary)", type=['zip', 'geojson', 'kml', 'gpkg'], key="f2")
@@ -507,7 +503,6 @@ def main():
                         with open(p,"wb") as f: f.write(f2.getbuffer())
                         st.session_state['secondary_gdf'] = extract_and_read_first(p, td) if p.endswith('.zip') else gpd.read_file(p)
 
-            # 2. TOOLS
             with st.expander("🛠️ 2. Operations", expanded=True):
                 category = st.selectbox("Category", ["Geoprocessing", "Geometry", "Analysis", "Overlay Operations", "Data Management"])
                 
@@ -520,7 +515,6 @@ def main():
                 
                 tool = st.selectbox("Tool", tool_options)
                 
-                # Dynamic Params
                 params = {}
                 if tool == "Buffer": params['dist'] = st.number_input("Distance (Map Units)", value=0.01, format="%.4f")
                 elif tool == "Simplify": params['tol'] = st.number_input("Tolerance", value=0.001, format="%.4f")
@@ -539,7 +533,6 @@ def main():
                         st.error("Layer A is required!")
                     else:
                         try:
-                            # EXECUTION LOGIC
                             if tool == "Buffer": 
                                 res_gdf = gdf.copy(); res_gdf['geometry'] = res_gdf.buffer(params['dist'])
                             elif tool == "Convex Hull": 
@@ -563,11 +556,9 @@ def main():
                                 res_gdf = gpd.GeoDataFrame({'geometry': gpd.points_from_xy([x], [y])}, crs=gdf.crs)
                             elif tool == "Statistics":
                                 st.info(f"Area: {gdf.area.sum()} | Length: {gdf.length.sum()}")
-                                res_gdf = gdf # No geometry change
-                            
-                            # Dual Layer Ops
+                                res_gdf = gdf 
                             elif tool in ["Intersection", "Difference", "Union", "Spatial Join", "Merge"]:
-                                if sec_gdf is None: st.error("Layer B required for this tool.");
+                                if sec_gdf is None: st.error("Layer B required.");
                                 else:
                                     if gdf.crs != sec_gdf.crs: sec_gdf = sec_gdf.to_crs(gdf.crs)
                                     if tool == "Intersection": res_gdf = gpd.overlay(gdf, sec_gdf, how='intersection')
@@ -584,22 +575,20 @@ def main():
                             st.error(f"Processing Error: {e}")
 
         with col_map:
-            # Optimized Colors for Hybrid Map Visibility
             layers = []
-            if st.session_state['main_gdf'] is not None: layers.append((st.session_state['main_gdf'], "Layer A", "#FFA500")) # Orange
-            if st.session_state['secondary_gdf'] is not None: layers.append((st.session_state['secondary_gdf'], "Layer B", "#00E5FF")) # Cyan
-            if st.session_state['calc_result_gdf'] is not None: layers.append((st.session_state['calc_result_gdf'], "Result", "#39FF14")) # Neon Green
+            if st.session_state['main_gdf'] is not None: layers.append((st.session_state['main_gdf'], "Layer A", "#FFA500"))
+            if st.session_state['secondary_gdf'] is not None: layers.append((st.session_state['secondary_gdf'], "Layer B", "#00E5FF"))
+            if st.session_state['calc_result_gdf'] is not None: layers.append((st.session_state['calc_result_gdf'], "Result", "#39FF14"))
             
-            render_map(layers, height=600)
+            render_map(layers, height=550)
             
-            # Result Download
             if st.session_state['calc_result_gdf'] is not None:
                 with st.container(border=True):
                     c1, c2 = st.columns([2, 1])
                     with c1:
                          out_fmt = st.selectbox("Export Result As", ["GeoJSON", "ESRI Shapefile (.zip)", "KML", "GeoPackage"])
                     with c2:
-                         st.write("") # Spacer
+                         st.write("") 
                          st.write("") 
                          d, e, m = handle_export(st.session_state['calc_result_gdf'], out_fmt, "analysis_result")
                          if d: st.download_button("Download Result", d, f"result{e}", m, use_container_width=True, type="primary")
