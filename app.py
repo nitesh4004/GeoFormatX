@@ -32,7 +32,6 @@ for k in keys:
         st.session_state[k] = None
 
 # --- 2. DUAL-MODE ADAPTIVE STYLING ---
-# We use var(--variable) to let Streamlit handle the colors automatically
 st.markdown("""
     <style>
     /* Remove top padding for cleaner look */
@@ -43,10 +42,10 @@ st.markdown("""
     
     /* ADAPTIVE METRIC CARDS */
     div[data-testid="stMetric"] {
-        background-color: var(--secondary-background-color); /* Auto-adapts to dark/light */
+        background-color: var(--secondary-background-color); 
         padding: 15px;
         border-radius: 8px;
-        border-left: 5px solid #0068C9; /* Consistent Accent Color */
+        border-left: 5px solid #0068C9;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         color: var(--text-color);
     }
@@ -54,7 +53,7 @@ st.markdown("""
     /* MAP BORDER */
     iframe {
         border-radius: 8px;
-        border: 1px solid rgba(128, 128, 128, 0.2); /* Subtle border visible in both modes */
+        border: 1px solid rgba(128, 128, 128, 0.2); 
     }
     
     /* CUSTOM TOAST */
@@ -154,35 +153,34 @@ def convert_crs(gdf, target_epsg):
 
 def render_map(gdf_list, height=600):
     """
-    Renders interactive Folium map.
+    Renders interactive Folium map with Google Hybrid tiles.
     gdf_list: list of tuples (gdf, layer_name, color)
     """
     if not gdf_list or gdf_list[0][0] is None:
-        m = folium.Map(location=[20.5937, 78.9629], zoom_start=4)
-        return st_folium(m, height=height, use_container_width=True)
+        # Default view of India
+        m = folium.Map(location=[20.5937, 78.9629], zoom_start=4, tiles=None)
+    else:
+        # Center map on first layer
+        first_gdf = gdf_list[0][0]
+        if first_gdf.crs != "EPSG:4326": 
+            first_gdf = first_gdf.to_crs(epsg=4326)
+        
+        bounds = first_gdf.total_bounds
+        center_lat = (bounds[1] + bounds[3]) / 2
+        center_lon = (bounds[0] + bounds[2]) / 2
+        
+        m = folium.Map(location=[center_lat, center_lon], zoom_start=6, tiles=None)
 
-    # Base map settings
-    first_gdf = gdf_list[0][0]
-    if first_gdf.crs != "EPSG:4326": first_gdf = first_gdf.to_crs(epsg=4326)
-    
-    bounds = first_gdf.total_bounds
-    center_lat = (bounds[1] + bounds[3]) / 2
-    center_lon = (bounds[0] + bounds[2]) / 2
-
-    # Using 'CartoDB positron' as base - it's neutral and works well for overlays in both dark/light contexts
-    # Alternatives like 'CartoDB dark_matter' are too dark for standard presentations
-    m = folium.Map(location=[center_lat, center_lon], zoom_start=6, tiles="CartoDB positron")
-    
-    # Add Satellite View (Good for context in dark mode)
+    # Add Google Hybrid Layer (Satellite + Roads/Labels)
     folium.TileLayer(
-        tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+        tiles='https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', # lyrs=y for Hybrid
         attr='Google',
-        name='Google Satellite',
+        name='Google Hybrid',
         overlay=False,
         control=True
     ).add_to(m)
 
-    # Add Layers with High Contrast Colors
+    # Add Layers
     for gdf, name, color in gdf_list:
         if gdf is not None:
             if gdf.crs != "EPSG:4326": gdf = gdf.to_crs(epsg=4326)
@@ -196,7 +194,7 @@ def render_map(gdf_list, height=600):
                     'fillColor': color, 
                     'color': color, 
                     'weight': 2, 
-                    'fillOpacity': 0.5 # Increased opacity for visibility
+                    'fillOpacity': 0.5 
                 },
                 tooltip=folium.GeoJsonTooltip(fields=tooltip_cols) if tooltip_cols else None
             ).add_to(m)
@@ -268,7 +266,7 @@ def main():
         )
         st.divider()
         st.markdown("**User Guide**")
-        st.info("💡 Use the 'Google Satellite' layer in the map for better context.")
+        st.info("💡 Map set to Google Hybrid (Satellite + Labels).")
 
     # --- 1. ADMIN DOWNLOADER MODULE ---
     if selected == "Admin Data":
@@ -348,7 +346,7 @@ def main():
                         
         with col_map:
             current_data = locals().get('final_selection', st.session_state['main_gdf'])
-            # Use Blue (#3388ff) which is visible on both light/dark maps
+            # Use Bright Blue (#3388ff) which contrasts well against Hybrid Map
             render_map([(current_data, "Admin Boundary", "#3388ff")])
             
             if current_data is not None:
@@ -400,8 +398,8 @@ def main():
                     st.info("Click 'Load River Database' to begin.")
         
         with col_map:
-            # Use Strong Blue for Rivers
-            render_map([(selected_river, "River Flow", "#0068C9")])
+            # Use Cyan (#00E5FF) for Rivers to pop against Satellite background
+            render_map([(selected_river, "River Flow", "#00E5FF")])
 
 
     # --- 3. FORMAT CONVERTER MODULE ---
@@ -462,7 +460,7 @@ def main():
                         if d: st.download_button("Download Result", d, f"converted{e}", m, use_container_width=True)
             
             with col_map:
-                # Use Red (#FF4B4B) for user uploads to distinguish from standard data
+                # Use Red (#FF4B4B) - visible on hybrid
                 render_map([(gdf, "Converted Data", "#FF4B4B")])
 
     # --- 4. VECTOR CALCULATOR MODULE (FULL FEATURES) ---
@@ -566,14 +564,11 @@ def main():
                             st.error(f"Processing Error: {e}")
 
         with col_map:
-            # Color Logic:
-            # Layer A: Gray (Neutral)
-            # Layer B: Orange (Distinct from result)
-            # Result: Green (Success/Output)
+            # Optimized Colors for Hybrid Map Visibility
             layers = []
-            if st.session_state['main_gdf'] is not None: layers.append((st.session_state['main_gdf'], "Layer A", "gray"))
-            if st.session_state['secondary_gdf'] is not None: layers.append((st.session_state['secondary_gdf'], "Layer B", "orange"))
-            if st.session_state['calc_result_gdf'] is not None: layers.append((st.session_state['calc_result_gdf'], "Result", "#00C853"))
+            if st.session_state['main_gdf'] is not None: layers.append((st.session_state['main_gdf'], "Layer A", "#FFA500")) # Orange
+            if st.session_state['secondary_gdf'] is not None: layers.append((st.session_state['secondary_gdf'], "Layer B", "#00E5FF")) # Cyan
+            if st.session_state['calc_result_gdf'] is not None: layers.append((st.session_state['calc_result_gdf'], "Result", "#39FF14")) # Neon Green
             
             render_map(layers, height=600)
             
