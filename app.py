@@ -274,7 +274,7 @@ def main():
     # --- NAVIGATION SIDEBAR ---
     with st.sidebar:
         st.title("GeoFormatX") # Targets H1 CSS
-        st.caption("Professional Geospatial Suite v5.0")
+        st.caption("Devoloped by Nitesh Kumar")
         
         selected = option_menu(
             menu_title=None,
@@ -596,3 +596,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
