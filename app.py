@@ -13,7 +13,7 @@ import shapely
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(
-    page_title="GeoFormatX Ultimate",
+    page_title="GeoFormatX",
     page_icon="🌍",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -33,23 +33,52 @@ if 'input_gdf' not in st.session_state:
 if 'overlay_gdf' not in st.session_state:
     st.session_state['overlay_gdf'] = None
 
-# --- 2. CLEAN MINIMALIST STYLING ---
+# --- 2. CLEAN MINIMALIST STYLING (SpecTralNi30 Theme) ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap');
 
-    html, body, [class*="css"] {
+    /* General Font Application */
+    html, body, [class*="css"], [data-testid="stAppViewContainer"] {
         font-family: 'Outfit', sans-serif;
+        color: #1a1a1a;
     }
 
-    code, pre {
+    code, pre, .stCodeBlock {
         font-family: 'Space Mono', monospace;
+    }
+
+    /* === SIDEBAR STYLING === */
+    [data-testid="stSidebar"] {
+        background-color: #f8f9fa;
+        border-right: 1px solid #ddd;
+    }
+
+    .sidebar-title {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #0068C9; /* Primary Blue */
+        margin-bottom: 0.2rem;
+        letter-spacing: -0.5px;
+    }
+
+    .sidebar-subtitle {
+        font-size: 0.85rem;
+        color: #999999;
+        margin-bottom: 2rem;
+        font-weight: 400;
+    }
+
+    .sidebar-section {
+        margin-bottom: 1.5rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid rgba(0,104,201,0.1);
     }
 
     /* === MINIMALIST CARD STYLING === */
     .minimal-card {
         background: #FFFFFF;
-        border: none;
+        border: 1px solid #f0f0f0;
         border-left: 4px solid #0068C9;
         border-radius: 4px;
         padding: 1.25rem;
@@ -67,12 +96,14 @@ st.markdown("""
         color: #1a1a1a;
         font-weight: 600;
         letter-spacing: -0.3px;
+        font-size: 1.1rem;
     }
 
     .minimal-card p {
         color: #555555;
         line-height: 1.6;
         margin: 0.5rem 0;
+        font-size: 0.95rem;
     }
     
     .guideline-box {
@@ -93,46 +124,6 @@ st.markdown("""
         gap: 0.5rem;
     }
 
-    @media (prefers-color-scheme: dark) {
-        .minimal-card {
-            background: #1E1E1E;
-            border-left-color: #0068C9;
-        }
-        .minimal-card h2, .minimal-card h3 {
-            color: #FFFFFF;
-        }
-        .minimal-card p {
-            color: #CCCCCC;
-        }
-        .guideline-box {
-            background-color: #262730;
-            border-color: #363945;
-            color: #FAFAFA;
-        }
-    }
-
-    /* === SIDEBAR STYLING === */
-    .sidebar-title {
-        font-size: 1.3rem;
-        font-weight: 700;
-        color: #0068C9;
-        margin-bottom: 0.5rem;
-        letter-spacing: -0.5px;
-    }
-
-    .sidebar-subtitle {
-        font-size: 0.85rem;
-        color: #999999;
-        margin-bottom: 1.5rem;
-        font-weight: 400;
-    }
-
-    .sidebar-section {
-        margin-bottom: 1.5rem;
-        padding-bottom: 1rem;
-        border-bottom: 1px solid rgba(0,104,201,0.1);
-    }
-
     /* === BUTTON STYLING === */
     .stButton > button {
         background-color: #0068C9;
@@ -143,12 +134,15 @@ st.markdown("""
         padding: 0.6rem 1.2rem;
         transition: all 0.2s ease;
         letter-spacing: 0.2px;
+        width: 100%;
     }
 
     .stButton > button:hover {
-        background-color: #0053a6;
+        background-color: #0053a6; /* Darker Hover Blue */
+        color: white;
         box-shadow: 0 4px 12px rgba(0,104,201,0.25);
         transform: translateY(-1px);
+        border: none;
     }
 
     /* === METRIC STYLING === */
@@ -160,6 +154,7 @@ st.markdown("""
         margin-right: 1rem;
         margin-bottom: 0.5rem;
         border-left: 3px solid #0068C9;
+        width: 100%;
     }
 
     .metric-label {
@@ -176,12 +171,33 @@ st.markdown("""
         color: #1a1a1a;
     }
 
+    /* Dark Mode Adjustments */
     @media (prefers-color-scheme: dark) {
+        .minimal-card {
+            background: #1E1E1E;
+            border-left-color: #0068C9;
+            border: 1px solid #333;
+        }
+        .minimal-card h2, .minimal-card h3 {
+            color: #FFFFFF;
+        }
+        .minimal-card p {
+            color: #CCCCCC;
+        }
+        .guideline-box {
+            background-color: #262730;
+            border-color: #363945;
+            color: #FAFAFA;
+        }
         .metric-item {
             background: #2a2a2a;
         }
         .metric-value {
             color: #FFFFFF;
+        }
+        [data-testid="stSidebar"] {
+            background-color: #1a1b20;
+            border-right: 1px solid #333;
         }
     }
     
@@ -189,6 +205,7 @@ st.markdown("""
     .streamlit-expanderHeader {
         border-left: 3px solid #0068C9;
         padding-left: 0.75rem;
+        background-color: transparent;
     }
     
     /* === HEADER STYLING === */
@@ -196,6 +213,7 @@ st.markdown("""
         color: #1a1a1a;
         border-bottom: 3px solid #0068C9;
         padding-bottom: 0.75rem;
+        font-size: 2rem;
     }
 
     @media (prefers-color-scheme: dark) {
