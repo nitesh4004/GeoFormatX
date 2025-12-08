@@ -34,12 +34,32 @@ for k in keys:
 # --- 2. DUAL-MODE ADAPTIVE STYLING ---
 st.markdown("""
     <style>
-    /* Remove top padding for cleaner look */
+    /* 1. FIX CLIPPING & SPACING */
     .block-container {
-        padding-top: 1rem;
-        padding-bottom: 0rem;
+        padding-top: 2.5rem !important; /* Increased to prevent top text clipping */
+        padding-bottom: 1rem;
     }
     
+    /* 2. SIDEBAR TITLE (APP NAME) - INCREASE SIZE */
+    [data-testid="stSidebar"] h1 {
+        font-size: 3rem !important; /* Much larger */
+        font-weight: 800 !important;
+        background: -webkit-linear-gradient(45deg, #0068C9, #00E5FF);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        padding-top: 1rem !important;
+        margin-bottom: 1rem !important;
+    }
+
+    /* 3. CONTENT HEADERS (e.g., "Administrative Boundaries") - REDUCE SIZE */
+    h2 {
+        font-size: 1.5rem !important; /* Reduced size */
+        font-weight: 600 !important;
+        padding-top: 10px !important; /* Extra padding to stop black line clipping */
+        margin-bottom: 0.5rem !important;
+        line-height: 1.4 !important; /* Better line spacing */
+    }
+
     /* ADAPTIVE METRIC CARDS */
     div[data-testid="stMetric"] {
         background-color: var(--secondary-background-color); 
@@ -248,7 +268,7 @@ def handle_export(gdf, output_format, file_prefix="export"):
 def main():
     # --- NAVIGATION SIDEBAR ---
     with st.sidebar:
-        st.title("GeoFormatX")
+        st.title("GeoFormatX") # Now targets h1 in sidebar with larger font
         st.caption("Professional Geospatial Suite v5.0")
         
         # Transparent background for container to adapt to sidebar color
@@ -270,7 +290,7 @@ def main():
 
     # --- 1. ADMIN DOWNLOADER MODULE ---
     if selected == "Admin Data":
-        st.markdown("## 🏛️ Administrative Boundaries")
+        st.markdown("## 🏛️ Administrative Boundaries") # H2 - Reduced size via CSS
         
         col_ctrl, col_map = st.columns([1, 2.5], gap="medium")
         
