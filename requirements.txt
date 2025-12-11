@@ -10,3 +10,11 @@ streamlit-folium
 folium
 streamlit-option-menu
 
+flask
+flask-cors
+gunicorn
+rasterio
+globs
+pytorch-lightning
+
+
