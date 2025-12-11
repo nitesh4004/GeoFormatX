@@ -273,7 +273,8 @@ def handle_export(gdf, output_format, file_prefix="export"):
 def main():
     # --- NAVIGATION SIDEBAR ---
     with st.sidebar:
-        st.title("GeoFormatX") # Targets H1 CSS
+        # Replaced Text Title with Image Logo
+        st.image("https://github.com/nitesh4004/GeoFormatX/raw/main/docs/logo.png", use_container_width=True)
         st.caption("Devoloped by Nitesh Kumar")
         
         selected = option_menu(
@@ -520,8 +521,8 @@ def main():
                 if tool == "Buffer": params['dist'] = st.number_input("Distance (Map Units)", value=0.01, format="%.4f")
                 elif tool == "Simplify": params['tol'] = st.number_input("Tolerance", value=0.001, format="%.4f")
                 elif tool == "Dissolve" and st.session_state['main_gdf'] is not None:
-                     cols = ["All"] + list(st.session_state['main_gdf'].columns)
-                     params['col'] = st.selectbox("Dissolve Field", cols)
+                      cols = ["All"] + list(st.session_state['main_gdf'].columns)
+                      params['col'] = st.selectbox("Dissolve Field", cols)
                 elif tool == "Spatial Join": params['op'] = st.selectbox("Predicate", ["intersects", "contains", "within"])
                 elif tool == "Reproject": params['epsg'] = st.number_input("Target EPSG", value=3857)
 
@@ -587,13 +588,12 @@ def main():
                 with st.container(border=True):
                     c1, c2 = st.columns([2, 1])
                     with c1:
-                         out_fmt = st.selectbox("Export Result As", ["GeoJSON", "ESRI Shapefile (.zip)", "KML", "GeoPackage"])
+                          out_fmt = st.selectbox("Export Result As", ["GeoJSON", "ESRI Shapefile (.zip)", "KML", "GeoPackage"])
                     with c2:
-                         st.write("") 
-                         st.write("") 
-                         d, e, m = handle_export(st.session_state['calc_result_gdf'], out_fmt, "analysis_result")
-                         if d: st.download_button("Download Result", d, f"result{e}", m, use_container_width=True, type="primary")
+                          st.write("") 
+                          st.write("") 
+                          d, e, m = handle_export(st.session_state['calc_result_gdf'], out_fmt, "analysis_result")
+                          if d: st.download_button("Download Result", d, f"result{e}", m, use_container_width=True, type="primary")
 
 if __name__ == "__main__":
     main()
-
