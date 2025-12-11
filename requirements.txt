@@ -14,7 +14,6 @@ flask
 flask-cors
 gunicorn
 rasterio
-globs
-pytorch-lightning
+
 
 
