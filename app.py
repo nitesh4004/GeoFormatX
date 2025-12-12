@@ -36,7 +36,7 @@ st.markdown("""
     <style>
     /* 1. FIX CLIPPING: Increase padding-top so text doesn't hide behind the top bar */
     .block-container {
-        padding-top: 3.5rem !important; /* Increased from 1.5rem to 3.5rem */
+        padding-top: 3.5rem !important; 
         padding-bottom: 1rem !important;
         max-width: 95% !important;
     }
@@ -53,7 +53,7 @@ st.markdown("""
         line-height: 1.2 !important;
     }
 
-    /* 3. SECTION HEADERS (Feature Names like "Administrative Boundaries") */
+    /* 3. SECTION HEADERS */
     h2 {
         font-size: 1.5rem !important;
         font-weight: 600 !important;
@@ -61,7 +61,7 @@ st.markdown("""
         margin-bottom: 0.5rem !important;
         border-bottom: 1px solid rgba(128,128,128,0.2);
         padding-bottom: 5px;
-        line-height: 1.5 !important; /* Fix line height clipping */
+        line-height: 1.5 !important;
     }
 
     /* 4. METRIC CARDS (Compact) */
@@ -180,22 +180,26 @@ def convert_crs(gdf, target_epsg):
     if gdf.crs is None: gdf.set_crs(epsg=4326, inplace=True)
     return gdf.to_crs(epsg=target_epsg)
 
-def render_map(gdf_list, height=550):
+def render_map(gdf_list, height=550, show_geometries=True):
     """
-    Renders interactive Folium map with Google Hybrid tiles.
+    Renders interactive Folium map. 
+    Added show_geometries flag to control visibility.
     """
+    # Base Map
     if not gdf_list or gdf_list[0][0] is None:
         m = folium.Map(location=[20.5937, 78.9629], zoom_start=4, tiles=None)
     else:
         first_gdf = gdf_list[0][0]
+        # Calculate bounds even if we don't show geometry, to center map
         if first_gdf.crs != "EPSG:4326": 
-            first_gdf = first_gdf.to_crs(epsg=4326)
+            temp_gdf = first_gdf.to_crs(epsg=4326)
+        else:
+            temp_gdf = first_gdf
         
-        bounds = first_gdf.total_bounds
+        bounds = temp_gdf.total_bounds
         center_lat = (bounds[1] + bounds[3]) / 2
         center_lon = (bounds[0] + bounds[2]) / 2
-        
-        m = folium.Map(location=[center_lat, center_lon], zoom_start=6, tiles=None)
+        m = folium.Map(location=[center_lat, center_lon], zoom_start=10, tiles=None)
 
     # Google Hybrid Layer
     folium.TileLayer(
@@ -206,23 +210,24 @@ def render_map(gdf_list, height=550):
         control=True
     ).add_to(m)
 
-    for gdf, name, color in gdf_list:
-        if gdf is not None:
-            if gdf.crs != "EPSG:4326": gdf = gdf.to_crs(epsg=4326)
-            
-            tooltip_cols = list(gdf.columns[:3]) if len(gdf.columns) > 0 else None
-            
-            folium.GeoJson(
-                gdf,
-                name=name,
-                style_function=lambda x, color=color: {
-                    'fillColor': color, 
-                    'color': color, 
-                    'weight': 2, 
-                    'fillOpacity': 0.5 
-                },
-                tooltip=folium.GeoJsonTooltip(fields=tooltip_cols) if tooltip_cols else None
-            ).add_to(m)
+    if show_geometries:
+        for gdf, name, color in gdf_list:
+            if gdf is not None and not gdf.empty:
+                if gdf.crs != "EPSG:4326": gdf = gdf.to_crs(epsg=4326)
+                
+                tooltip_cols = list(gdf.columns[:3]) if len(gdf.columns) > 0 else None
+                
+                folium.GeoJson(
+                    gdf,
+                    name=name,
+                    style_function=lambda x, color=color: {
+                        'fillColor': color, 
+                        'color': color, 
+                        'weight': 2, 
+                        'fillOpacity': 0.5 
+                    },
+                    tooltip=folium.GeoJsonTooltip(fields=tooltip_cols) if tooltip_cols else None
+                ).add_to(m)
 
     folium.LayerControl().add_to(m)
     return st_folium(m, height=height, use_container_width=True)
@@ -273,7 +278,6 @@ def handle_export(gdf, output_format, file_prefix="export"):
 def main():
     # --- NAVIGATION SIDEBAR ---
     with st.sidebar:
-        # Replaced Text Title with Image Logo
         st.image("https://github.com/nitesh4004/GeoFormatX/raw/main/docs/logo.png", use_container_width=True)
         st.caption("Devoloped by Nitesh Kumar")
         
@@ -295,7 +299,7 @@ def main():
 
     # --- 1. ADMIN DOWNLOADER MODULE ---
     if selected == "Admin Data":
-        st.markdown("## 🏛️ Administrative Boundaries") # H2 - Fix clipping
+        st.markdown("## 🏛️ Administrative Boundaries") 
         
         col_ctrl, col_map = st.columns([1, 2.5], gap="medium")
         
@@ -337,7 +341,11 @@ def main():
                     st.subheader("2. Filter Region")
                     
                     final_selection = gdf
+                    # Placeholder for the parent level data (Subdistrict) to allow flexible download
+                    parent_level_selection = gdf 
+                    
                     filename = "export"
+                    is_specific_village_selected = False
                     
                     if 'STATE' in gdf.columns:
                         states = sorted(gdf['STATE'].astype(str).unique())
@@ -358,18 +366,53 @@ def main():
                                     if sel_sub != "All":
                                         final_selection = final_selection[final_selection['Subdistrict'] == sel_sub]
                                         filename = f"{sel_sub}_{sel_dist}"
+                                        
+                                        # Store the subdistrict level data before filtering down to village
+                                        parent_level_selection = final_selection
+
+                                        if 'Village' in gdf.columns:
+                                            vills = sorted(final_selection['Village'].astype(str).unique())
+                                            sel_vill = st.selectbox("Village", ["All"] + vills)
+                                            if sel_vill != "All":
+                                                final_selection = final_selection[final_selection['Village'] == sel_vill]
+                                                filename = f"{sel_vill}_{sel_sub}"
+                                                is_specific_village_selected = True
 
                     st.markdown(f"**Selected Features:** `{len(final_selection)}`")
                     
                     st.subheader("3. Export")
+                    
+                    # LOGIC FOR DOWNLOADING SINGLE VS WHOLE SUBDISTRICT
+                    export_gdf = final_selection
+                    export_filename = filename
+
+                    if is_specific_village_selected:
+                        st.markdown("Download Options:")
+                        download_scope = st.radio(
+                            "Select Data Range:", 
+                            ["Selected Village Only", "Entire Subdistrict"],
+                            index=0
+                        )
+                        if download_scope == "Entire Subdistrict":
+                            export_gdf = parent_level_selection
+                            export_filename = f"{sel_sub}_Entire_Subdistrict"
+                            st.caption(f"Will download all {len(export_gdf)} villages in {sel_sub}.")
+
                     fmt = st.selectbox("Format", ["ESRI Shapefile (.zip)", "GeoJSON", "KML", "GeoPackage"])
                     if st.button("Download Selection", use_container_width=True):
-                        d, e, m = handle_export(final_selection, fmt, filename)
-                        if d: st.download_button("Save File", d, f"{filename}{e}", m, use_container_width=True)
+                        d, e, m = handle_export(export_gdf, fmt, export_filename)
+                        if d: st.download_button("Save File", d, f"{export_filename}{e}", m, use_container_width=True)
                         
         with col_map:
             current_data = locals().get('final_selection', st.session_state['main_gdf'])
-            render_map([(current_data, "Admin Boundary", "#3388ff")], height=550)
+            
+            # --- FEATURE: ASK TO SHOW ON MAP ---
+            st.markdown("### Map View")
+            col_toggle, col_dummy = st.columns([1, 2])
+            show_map = col_toggle.toggle("Show Geometry on Map", value=False, help="Enable this to render geometries. Keep off for large datasets to improve performance.")
+            
+            # Pass the show_map flag to the renderer
+            render_map([(current_data, "Admin Boundary", "#3388ff")], height=550, show_geometries=show_map)
             
             if current_data is not None:
                 with st.expander("📊 View Attribute Table"):
@@ -420,7 +463,9 @@ def main():
                     st.info("Click 'Load River Database' to begin.")
         
         with col_map:
-            render_map([(selected_river, "River Flow", "#00E5FF")], height=550)
+            # Added toggle for Rivers as well, just in case
+            show_river_map = st.toggle("Show River on Map", value=True)
+            render_map([(selected_river, "River Flow", "#00E5FF")], height=550, show_geometries=show_river_map)
 
 
     # --- 3. FORMAT CONVERTER MODULE ---
@@ -480,7 +525,8 @@ def main():
                         if d: st.download_button("Download Result", d, f"converted{e}", m, use_container_width=True)
             
             with col_map:
-                render_map([(gdf, "Converted Data", "#FF4B4B")], height=550)
+                show_conv_map = st.toggle("Show Geometry on Map", value=True)
+                render_map([(gdf, "Converted Data", "#FF4B4B")], height=550, show_geometries=show_conv_map)
 
     # --- 4. VECTOR CALCULATOR MODULE ---
     elif selected == "Vector Calculator":
@@ -582,7 +628,8 @@ def main():
             if st.session_state['secondary_gdf'] is not None: layers.append((st.session_state['secondary_gdf'], "Layer B", "#00E5FF"))
             if st.session_state['calc_result_gdf'] is not None: layers.append((st.session_state['calc_result_gdf'], "Result", "#39FF14"))
             
-            render_map(layers, height=550)
+            show_calc_map = st.toggle("Show Geometry on Map", value=True)
+            render_map(layers, height=550, show_geometries=show_calc_map)
             
             if st.session_state['calc_result_gdf'] is not None:
                 with st.container(border=True):
@@ -597,4 +644,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
