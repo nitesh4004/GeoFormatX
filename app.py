@@ -6,6 +6,7 @@ import os
 import tempfile
 import gdown
 import requests
+import zipfile
 from zipfile import ZipFile
 from io import BytesIO
 from shapely import wkt
@@ -36,7 +37,7 @@ st.markdown("""
     <style>
     /* 1. FIX CLIPPING: Increase padding-top so text doesn't hide behind the top bar */
     .block-container {
-        padding-top: 3.5rem !important; /* Increased from 1.5rem to 3.5rem */
+        padding-top: 3.5rem !important;
         padding-bottom: 1rem !important;
         max-width: 95% !important;
     }
@@ -61,7 +62,7 @@ st.markdown("""
         margin-bottom: 0.5rem !important;
         border-bottom: 1px solid rgba(128,128,128,0.2);
         padding-bottom: 5px;
-        line-height: 1.5 !important; /* Fix line height clipping */
+        line-height: 1.5 !important;
     }
 
     /* 4. METRIC CARDS (Compact) */
@@ -93,61 +94,79 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. DATA CONSTANTS ---
+# --- 3. DATA CONSTANTS (UPDATED FROM SCREENSHOT) ---
+# Note: "Placeholder" indicates states not present in the provided screenshot list.
 STATE_VILLAGE_IDS = {
-    "ANDAMAN_&_NICOBAR_ISLANDS": "1aikaQXqP9xtDhMcQFyUn8g9gGi0Tam0s",
-    "ANDHRA_PRADESH": "1fkDuJI6oC0h8LQCvCh9elhKq0KbXQbTj",
+    "ANDAMAN_&_NICOBAR_ISLANDS": "1cmB56wZ01GLwjgYO3WviYjRiKJm7E9zZ",
+    "ANDHRA_PRADESH": "1j_ldP04Wq_VALjiqrJ_C9XED-5-hoayP",
     "ARUNACHAL_PRADESH": "1_Example_ID_Placeholder",
-    "ASSAM": "1_Example_ID_Placeholder",
-    "BIHAR": "14QA_fZiSPYFKy9CfvqL4Z-9v9FWaAWBC",
-    "CHANDIGARH": "1cr9Px3o70pJTRSRcqTN1kS18AcTeksu_",
-    "CHHATTISGARH": "1Kk3sUbMBysyDwVYTnBBGaqF9E9p7372c",
-    "DELHI": "1UuiNX9cQvj3BZIhcojvEb6cZv3ic0NMy",
-    "GOA": "1re0K0LUr1k9ZgqsKJoQpynLXtmFQQECs",
-    "GUJARAT": "1_Example_ID_Placeholder",
-    "HARYANA": "1Ab1ccMk-papacEOK74CST_nLFBbwRQia",
+    "ASSAM": "1-LpjpJ8CzkpUak1FtkENR1k0o9gZHb76",
+    "BIHAR": "1stvDHqzGQ-U4mOGYG6G2OQlD-Tv7WjJx",
+    "CHANDIGARH": "1fSYVvyHkp0Tsscli2dzVat_HiQMFLhbX",
+    "CHHATTISGARH": "1LlqWrZ63_vpdXyMRQZCpRrgMcAe8JOD1",
+    "DELHI": "1WuRGx9PnXM-Q9vAm-PHklDl9ZJ-bFwxr",
+    "GOA": "17QoUqFRlZONtcGyXWI8bl2DzLY3VUx8g",
+    "GUJARAT": "10-DHX7pRLf0_tHuGXgcrg3ycRzwPzrYp",
+    "HARYANA": "1RMzhNfBc3Qydu8dcufH2z1hqJ1GHGL14",
     "HIMACHAL_PRADESH": "1_Example_ID_Placeholder",
     "JAMMU_&_KASHMIR": "1_Example_ID_Placeholder",
-    "JHARKHAND": "16w2g-ppENXpbAAbtG05bepQjVleijQCB",
-    "KARNATAKA": "1daGp_O2RmMjjT8ATsaRX75XWNfWZaPsM",
-    "KERALA": "1qva1qt4luInTg6tb_6vCKU7qKhbBvj1J",
-    "LAKSHYADWEEP": "10vUXwZ8A_UNWaLAFvDZGfbi985_E8oxc",
-    "MADHYA_PRADESH": "1WnwwFX8AtY4P9mDJq8Wd09nqEcIhOHk4",
-    "MAHARASHTRA": "1NspjfpGqxNb1G6fJSmlGj82h5YTanULV",
+    "JHARKHAND": "1f4E1tp9wFgjf8Ki7wXxT3_f3V8OsrZ4",
+    "KARNATAKA": "1qwhX2mEi2KLIdu_UmZWyiqj8og2Gw8h6",
+    "KERALA": "1Vb8MwXLpmHyAn74C48j1sXgK5vRWown8",
+    "LAKSHADWEEP": "170O9R1_qYWPxr5vNso5FHY-dmDyHRnjF",
+    "MADHYA_PRADESH": "1UwKvTfqEKF4si1LgLmV0T6FsnlbAyDGy",
+    "MAHARASHTRA": "1NspjfpGqxNb1G6fJSmlGj82h5YTanULV", # Kept existing ID as it wasn't in screenshot to replace
     "MANIPUR": "1_Example_ID_Placeholder",
     "MEGHALAYA": "1_Example_ID_Placeholder",
     "MIZORAM": "1_Example_ID_Placeholder",
     "NAGALAND": "1_Example_ID_Placeholder",
-    "ODISHA": "1_Example_ID_Placeholder",
-    "PUDUCHERRY": "1_Example_ID_Placeholder",
-    "PUNJAB": "1_Example_ID_Placeholder",
-    "RAJASTHAN": "1_Example_ID_Placeholder",
+    "ODISHA": "16dcBiDAlrSM47H3FCvOAHnIVn93_8BZv",
+    "PUDUCHERRY": "1BNbnHeE1DV7gqFE35G-NhHz3GUFbTiUR",
+    "PUNJAB": "1AoKDBzbE28czoKbm8hEvOWuGhrssPqVt",
+    "RAJASTHAN": "1inEKNAhdVmCLG9YXokQtBrZUyNDoAjuO",
     "SIKKIM": "1_Example_ID_Placeholder",
-    "TAMIL_NADU": "1_Example_ID_Placeholder",
-    "TELANGANA": "1_Example_ID_Placeholder",
-    "TRIPURA": "1_Example_ID_Placeholder",
-    "UTTAR_PRADESH": "1_Example_ID_Placeholder",
-    "UTTARAKHAND": "1ydyLvZ3yiOWW9ltfYMlsKqBbnyLi0cu_",
-    "WEST_BENGAL": "1euxg0fPGT5XcbLt0dP25U2M4fEZ-dkNs"
+    "TAMIL_NADU": "13QiN4vLGxZpBnTUwO45Gd3RgDqjquEuR",
+    "TELANGANA": "1r-9S4fbi1VSm5AKUpxkrQi0G_BX8JYqM",
+    "TRIPURA": "1il_UOuggB4xyyC9c_SjkcFuiP5SryI-U",
+    "UTTAR_PRADESH": "1L-IUFfKafgfWM3HkDaxvYTMl9idIvN9v",
+    "UTTARAKHAND": "11wbIsbnpP9sCbfh7HaW0JCCOHeiiLcVs",
+    "WEST_BENGAL": "1If7q9pMHasI5-Q6RTghoO4MiD2-X0w54"
 }
 
 # --- 4. HELPER FUNCTIONS ---
 
 @st.cache_data(show_spinner=False)
 def load_file_from_url(url, is_gdrive=False):
+    """
+    Smart loader: Handles Zip files (extracts) or direct spatial files (GeoJSON/SHP) 
+    automatically.
+    """
     temp_dir = tempfile.mkdtemp()
-    zip_path = os.path.join(temp_dir, "downloaded_data.zip")
+    # Initial generic filename
+    download_path = os.path.join(temp_dir, "downloaded_data")
+    
     try:
         if is_gdrive:
-            gdown.download(url, zip_path, quiet=True, fuzzy=True)
+            gdown.download(url, download_path, quiet=True, fuzzy=True)
         else:
             response = requests.get(url, stream=True)
             if response.status_code != 200: return None
-            with open(zip_path, "wb") as f:
+            with open(download_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
-        return extract_and_read_first(zip_path, temp_dir)
-    except Exception:
+        
+        # Check if it is a Zip file
+        if zipfile.is_zipfile(download_path):
+            return extract_and_read_first(download_path, temp_dir)
+        else:
+            # If not a zip, assume it's a single spatial file (like GeoJSON)
+            # We rename it to .geojson to ensure drivers detect it correctly
+            new_path = download_path + ".geojson"
+            os.rename(download_path, new_path)
+            return gpd.read_file(new_path)
+            
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
         return None
 
 def extract_and_read_first(zip_path, temp_dir):
@@ -275,7 +294,7 @@ def main():
     with st.sidebar:
         # Replaced Text Title with Image Logo
         st.image("https://github.com/nitesh4004/GeoFormatX/raw/main/docs/logo.png", use_container_width=True)
-        st.caption("Devoloped by Nitesh Kumar")
+        st.caption("Developed by Nitesh Kumar")
         
         selected = option_menu(
             menu_title=None,
@@ -295,7 +314,7 @@ def main():
 
     # --- 1. ADMIN DOWNLOADER MODULE ---
     if selected == "Admin Data":
-        st.markdown("## 🏛️ Administrative Boundaries") # H2 - Fix clipping
+        st.markdown("## 🏛️ Administrative Boundaries") 
         
         col_ctrl, col_map = st.columns([1, 2.5], gap="medium")
         
@@ -321,6 +340,7 @@ def main():
                         elif source_type == "Villages" and target_state_key:
                              file_id = STATE_VILLAGE_IDS.get(target_state_key)
                              if "Placeholder" not in file_id:
+                                 # Smart loader will detect if this is a zip or geojson
                                  gdf = load_file_from_url(f"https://drive.google.com/uc?id={file_id}", True)
                              else:
                                  st.error("State data unavailable.")
