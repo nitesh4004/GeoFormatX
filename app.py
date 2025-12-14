@@ -430,7 +430,7 @@ def main():
                 with st.expander("📊 View Attribute Table"):
                     st.dataframe(current_data.drop(columns='geometry'), use_container_width=True)
 
-    # --- 2. POSTAL CODES MODULE (FIXED) ---
+    # --- 2. POSTAL CODES MODULE (DIRECT SEARCH ONLY) ---
     elif selected == "Postal Codes":
         st.markdown("## 📮 Postal Code Boundaries")
         
@@ -460,53 +460,18 @@ def main():
                 pgdf = st.session_state['postal_gdf']
                 filtered_pgdf = pgdf
                 
-                # --- FIXED: Initialization of variables to avoid UnboundLocalError ---
-                sel_circle = "All"
-                sel_region = "All"
-                sel_div = "All"
+                # Default init for filename safety
                 sel_pin = "All"
                 
                 with st.container(border=True):
                     st.subheader("2. Filter Location")
                     
-                    # New Feature: Switch between Hierarchy and Direct Pincode Search
-                    search_mode = st.radio("Search Mode", ["Drill Down (Hierarchy)", "Direct Pincode Search"], horizontal=True)
+                    # Direct Search Only
+                    all_pincodes = sorted(pgdf['Pincode'].dropna().astype(str).unique())
+                    sel_pin = st.selectbox("Search Pincode", ["All"] + all_pincodes)
                     
-                    if search_mode == "Drill Down (Hierarchy)":
-                        # 1. Circle (State Level)
-                        circles = sorted(pgdf['Circle'].dropna().astype(str).unique())
-                        sel_circle = st.selectbox("Select Circle", ["All"] + circles)
-                        
-                        if sel_circle != "All":
-                            filtered_pgdf = filtered_pgdf[filtered_pgdf['Circle'] == sel_circle]
-                            
-                            # 2. Region
-                            regions = sorted(filtered_pgdf['Region'].dropna().astype(str).unique())
-                            sel_region = st.selectbox("Select Region", ["All"] + regions)
-                            
-                            if sel_region != "All":
-                                filtered_pgdf = filtered_pgdf[filtered_pgdf['Region'] == sel_region]
-                                
-                                # 3. Division
-                                divisions = sorted(filtered_pgdf['Division'].dropna().astype(str).unique())
-                                sel_div = st.selectbox("Select Division", ["All"] + divisions)
-                                
-                                if sel_div != "All":
-                                    filtered_pgdf = filtered_pgdf[filtered_pgdf['Division'] == sel_div]
-                                    
-                                    # 4. Pincode
-                                    pincodes = sorted(filtered_pgdf['Pincode'].dropna().astype(str).unique())
-                                    sel_pin = st.selectbox("Select Pincode", ["All"] + pincodes)
-                                    
-                                    if sel_pin != "All":
-                                        filtered_pgdf = filtered_pgdf[filtered_pgdf['Pincode'].astype(str) == str(sel_pin)]
-                    
-                    else: # Direct Pincode Search
-                        all_pincodes = sorted(pgdf['Pincode'].dropna().astype(str).unique())
-                        sel_pin = st.selectbox("Search Pincode", ["All"] + all_pincodes)
-                        
-                        if sel_pin != "All":
-                            filtered_pgdf = filtered_pgdf[filtered_pgdf['Pincode'].astype(str) == str(sel_pin)]
+                    if sel_pin != "All":
+                        filtered_pgdf = filtered_pgdf[filtered_pgdf['Pincode'].astype(str) == str(sel_pin)]
 
                     st.markdown(f"**Found:** `{len(filtered_pgdf)}` postal boundaries")
 
@@ -514,14 +479,9 @@ def main():
                     st.subheader("3. Download")
                     fmt = st.selectbox("Format", ["ESRI Shapefile (.zip)", "GeoJSON", "KML", "GeoPackage"], key="postal_fmt")
                     
-                    # Safe Filename Generation
                     fname = "Postal_Export"
                     if sel_pin != "All":
                         fname = f"Pincode_{sel_pin}"
-                    elif sel_div != "All":
-                        fname = f"Division_{sel_div}"
-                    elif sel_circle != "All":
-                         fname = f"Postal_{sel_circle}"
                     
                     if st.button("Download Data", use_container_width=True):
                         d, e, m = handle_export(filtered_pgdf, fmt, fname)
