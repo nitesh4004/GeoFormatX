@@ -26,7 +26,8 @@ fiona.drvsupport.supported_drivers['KML'] = 'rw'
 fiona.drvsupport.supported_drivers['LIBKML'] = 'rw'
 
 # Session State Initialization
-keys = ['main_gdf', 'secondary_gdf', 'calc_result_gdf', 'calc_result_name', 'river_gdf', 'postal_gdf']
+# Added 'parliament_gdf' to the keys
+keys = ['main_gdf', 'secondary_gdf', 'calc_result_gdf', 'calc_result_name', 'river_gdf', 'postal_gdf', 'parliament_gdf']
 for k in keys:
     if k not in st.session_state:
         st.session_state[k] = None
@@ -230,7 +231,7 @@ def render_map(gdf_list, height=550, show_geometries=False):
                     else:
                         gdf_display = gdf
                     
-                    tooltip_cols = list(gdf_display.columns[:3]) if len(gdf_display.columns) > 0 else None
+                    tooltip_cols = list(gdf_display.columns[:4]) if len(gdf_display.columns) > 0 else None
                     
                     folium.GeoJson(
                         gdf_display,
@@ -300,8 +301,8 @@ def main():
         
         selected = option_menu(
             menu_title=None,
-            options=["Admin Data", "Postal Codes", "Rivers", "Converter", "Vector Calculator"],
-            icons=["building", "mailbox", "water", "arrow-repeat", "calculator"],
+            options=["Admin Data", "Postal Codes", "Parliament Boundaries", "Rivers", "Converter", "Vector Calculator"],
+            icons=["building", "mailbox", "bank", "water", "arrow-repeat", "calculator"],
             default_index=0,
             styles={
                 "container": {"padding": "0!important", "background-color": "transparent"},
@@ -443,7 +444,7 @@ def main():
                 
                 if st.session_state['postal_gdf'] is None:
                     if st.button("Load Postal Boundaries", type="primary", use_container_width=True):
-                        with st.spinner("Downloading Postal Data... (This may take a moment)"):
+                        with st.spinner("Downloading Postal Data..."):
                             gdf = load_file_from_url(f"https://drive.google.com/uc?id={postal_id}", is_gdrive=True)
                             if gdf is not None:
                                 st.session_state['postal_gdf'] = gdf
@@ -460,7 +461,6 @@ def main():
                 pgdf = st.session_state['postal_gdf']
                 filtered_pgdf = pgdf
                 
-                # Default init for filename safety
                 sel_pin = "All"
                 
                 with st.container(border=True):
@@ -497,7 +497,99 @@ def main():
                 with st.expander("📊 View Attribute Table"):
                     st.dataframe(current_postal.drop(columns='geometry', errors='ignore'), use_container_width=True)
 
-    # --- 3. RIVER DOWNLOADER MODULE ---
+    # --- 3. PARLIAMENT BOUNDARIES MODULE (NEW) ---
+    elif selected == "Parliament Boundaries":
+        st.markdown("## 🏛️ Parliament Boundaries (Lok Sabha)")
+        
+        col_ctrl, col_map = st.columns([1, 2.5], gap="medium")
+        
+        with col_ctrl:
+            with st.container(border=True):
+                st.subheader("1. Data Source")
+                parl_id = "1gNT2PIVMP2nxK_9CKmwzPp__TBDlozXs"
+                
+                if st.session_state['parliament_gdf'] is None:
+                    if st.button("Load Parliament Data", type="primary", use_container_width=True):
+                        with st.spinner("Downloading Parliament Boundaries..."):
+                            gdf = load_file_from_url(f"https://drive.google.com/uc?id={parl_id}", is_gdrive=True)
+                            if gdf is not None:
+                                st.session_state['parliament_gdf'] = gdf
+                                st.toast("Parliament Data Loaded!", icon="🏛️")
+                            else:
+                                st.error("Failed to load Data.")
+                else:
+                    st.success("Parliament Data Loaded.")
+                    if st.button("Reload Data", key="reload_parl"):
+                        st.session_state['parliament_gdf'] = None
+                        st.rerun()
+
+            if st.session_state['parliament_gdf'] is not None:
+                df = st.session_state['parliament_gdf']
+                filtered_df = df
+                
+                # Initialize variables
+                sel_state = "All"
+                sel_pc = "All"
+                sel_code = "All"
+                sel_res = "All"
+                
+                with st.container(border=True):
+                    st.subheader("2. Filter Constituency")
+                    
+                    # 1. Filter by State (ST_NAME)
+                    states = sorted(df['ST_NAME'].dropna().astype(str).unique())
+                    sel_state = st.selectbox("Select State (ST_NAME)", ["All"] + states)
+                    
+                    if sel_state != "All":
+                        filtered_df = filtered_df[filtered_df['ST_NAME'] == sel_state]
+                    
+                    # 2. Filter by Reservation (Res)
+                    res_types = sorted(filtered_df['Res'].dropna().astype(str).unique())
+                    sel_res = st.selectbox("Reservation Status", ["All"] + res_types)
+                    
+                    if sel_res != "All":
+                        filtered_df = filtered_df[filtered_df['Res'] == sel_res]
+
+                    # 3. Filter by PC Name (PC_NAME)
+                    pc_names = sorted(filtered_df['PC_NAME'].dropna().astype(str).unique())
+                    sel_pc = st.selectbox("Select Constituency (PC_NAME)", ["All"] + pc_names)
+                    
+                    if sel_pc != "All":
+                        filtered_df = filtered_df[filtered_df['PC_NAME'] == sel_pc]
+                        
+                    # 4. Filter by PC Code (PC_CODE)
+                    pc_codes = sorted(filtered_df['PC_CODE'].dropna().astype(str).unique())
+                    sel_code = st.selectbox("Select PC Code", ["All"] + pc_codes)
+                    
+                    if sel_code != "All":
+                        filtered_df = filtered_df[filtered_df['PC_CODE'].astype(str) == str(sel_code)]
+                        
+                    st.markdown(f"**Found:** `{len(filtered_df)}` constituencies")
+                    
+                    st.divider()
+                    st.subheader("3. Download")
+                    fmt = st.selectbox("Format", ["ESRI Shapefile (.zip)", "GeoJSON", "KML", "GeoPackage"], key="parl_fmt")
+                    
+                    fname = "Parliament_Export"
+                    if sel_pc != "All": fname = f"{sel_pc}_Constituency"
+                    elif sel_state != "All": fname = f"{sel_state}_Parliament_Boundaries"
+                    
+                    if st.button("Download Data", key="dl_parl", use_container_width=True):
+                        d, e, m = handle_export(filtered_df, fmt, fname)
+                        if d: st.download_button("Save File", d, f"{fname}{e}", m, use_container_width=True)
+
+        with col_map:
+            current_parl = locals().get('filtered_df', st.session_state['parliament_gdf'])
+            st.markdown("### Map View")
+            show_parl_map = st.toggle("Show Geometry on Map", value=True, key="parl_map_toggle")
+            render_map([(current_parl, "Parliament Boundaries", "#9b59b6")], height=550, show_geometries=show_parl_map)
+            
+            if current_parl is not None:
+                with st.expander("📊 View Attribute Table"):
+                    st.dataframe(current_parl.drop(columns='geometry', errors='ignore'), use_container_width=True)
+
+
+    # --- 4. RIVER DOWNLOADER MODULE ---
     elif selected == "Rivers":
         st.markdown("## 🌊 River Network Analysis")
         col_ctrl, col_map = st.columns([1, 2.5], gap="medium")
@@ -544,7 +636,7 @@ def main():
             render_map([(selected_river, "River Flow", "#00E5FF")], height=550, show_geometries=show_river_map)
 
 
-    # --- 4. FORMAT CONVERTER MODULE ---
+    # --- 5. FORMAT CONVERTER MODULE ---
     elif selected == "Converter":
         st.markdown("## 🔄 Universal Format Converter")
         
@@ -604,7 +696,7 @@ def main():
                 show_conv_map = st.toggle("Show Geometry on Map", value=True)
                 render_map([(gdf, "Converted Data", "#FF4B4B")], height=550, show_geometries=show_conv_map)
 
-    # --- 5. VECTOR CALCULATOR MODULE ---
+    # --- 6. VECTOR CALCULATOR MODULE ---
     elif selected == "Vector Calculator":
         st.markdown("## 🧮 Vector Operations")
         
