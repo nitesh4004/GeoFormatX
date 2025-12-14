@@ -6,7 +6,7 @@ import os
 import tempfile
 import gdown
 import requests
-from zipfile import ZipFile
+from zipfile import ZipFile, BadZipFile
 from io import BytesIO
 from shapely import wkt
 import folium
@@ -26,7 +26,8 @@ fiona.drvsupport.supported_drivers['KML'] = 'rw'
 fiona.drvsupport.supported_drivers['LIBKML'] = 'rw'
 
 # Session State Initialization
-keys = ['main_gdf', 'secondary_gdf', 'calc_result_gdf', 'calc_result_name', 'river_gdf']
+# Added 'postal_gdf' to the state keys
+keys = ['main_gdf', 'secondary_gdf', 'calc_result_gdf', 'calc_result_name', 'river_gdf', 'postal_gdf']
 for k in keys:
     if k not in st.session_state:
         st.session_state[k] = None
@@ -136,19 +137,41 @@ STATE_VILLAGE_IDS = {
 @st.cache_data(show_spinner=False)
 def load_file_from_url(url, is_gdrive=False):
     temp_dir = tempfile.mkdtemp()
-    zip_path = os.path.join(temp_dir, "downloaded_data.zip")
+    # We name it .dat initially to not force an extension, then check content
+    file_path = os.path.join(temp_dir, "downloaded_data") 
+    
     try:
         if is_gdrive:
-            gdown.download(url, zip_path, quiet=True, fuzzy=True)
+            gdown.download(url, file_path, quiet=True, fuzzy=True)
         else:
             response = requests.get(url, stream=True)
             if response.status_code != 200: return None
-            with open(zip_path, "wb") as f:
+            with open(file_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
-        return extract_and_read_first(zip_path, temp_dir)
-    except Exception:
+        
+        # Check if it's a zip or direct file
+        if is_zip(file_path):
+            return extract_and_read_first(file_path, temp_dir)
+        else:
+            # If not zip, try reading directly (assuming GeoJSON/JSON/KML)
+            try:
+                return gpd.read_file(file_path)
+            except Exception:
+                # If that fails, maybe rename to .geojson and try
+                os.rename(file_path, file_path + ".geojson")
+                return gpd.read_file(file_path + ".geojson")
+
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
         return None
+
+def is_zip(file_path):
+    try:
+        with ZipFile(file_path, 'r') as zip_ref:
+            return True
+    except BadZipFile:
+        return False
 
 def extract_and_read_first(zip_path, temp_dir):
     try:
@@ -156,7 +179,7 @@ def extract_and_read_first(zip_path, temp_dir):
             zip_ref.extractall(temp_dir)
         for root, dirs, files in os.walk(temp_dir):
             for file in files:
-                if file.endswith((".shp", ".geojson", ".kml", ".gpkg")):
+                if file.endswith((".shp", ".geojson", ".kml", ".gpkg", ".json")):
                     return gpd.read_file(os.path.join(root, file))
         return None
     except Exception:
@@ -183,11 +206,7 @@ def convert_crs(gdf, target_epsg):
 def render_map(gdf_list, height=550, show_geometries=False):
     """
     Renders interactive Folium map.
-    CRITICAL UPDATE: Now, if show_geometries is False, we do absolutely NO 
-    processing on the GDF (no bounds calculation, no CRS conversion).
-    This prevents the app from crashing with large datasets.
     """
-    
     # Initialize a default India map (Lightweight)
     m = folium.Map(location=[20.5937, 78.9629], zoom_start=4, tiles=None)
 
@@ -203,10 +222,9 @@ def render_map(gdf_list, height=550, show_geometries=False):
     # ONLY process data if the toggle is actively turned ON
     if show_geometries and gdf_list and gdf_list[0][0] is not None:
         try:
-            # We only calculate bounds and convert CRS here, inside the check
             first_gdf = gdf_list[0][0]
             
-            # Reproject for display (this is the heavy part we are avoiding when toggle is off)
+            # Reproject for display
             if first_gdf.crs != "EPSG:4326":
                 display_gdf = first_gdf.to_crs(epsg=4326)
             else:
@@ -294,8 +312,9 @@ def main():
         
         selected = option_menu(
             menu_title=None,
-            options=["Admin Data", "Rivers", "Converter", "Vector Calculator"],
-            icons=["building", "water", "arrow-repeat", "calculator"],
+            # Added "Postal Codes" to options
+            options=["Admin Data", "Postal Codes", "Rivers", "Converter", "Vector Calculator"],
+            icons=["building", "mailbox", "water", "arrow-repeat", "calculator"],
             default_index=0,
             styles={
                 "container": {"padding": "0!important", "background-color": "transparent"},
@@ -426,8 +445,95 @@ def main():
                 with st.expander("📊 View Attribute Table"):
                     st.dataframe(current_data.drop(columns='geometry'), use_container_width=True)
 
+    # --- 2. NEW POSTAL CODES MODULE ---
+    elif selected == "Postal Codes":
+        st.markdown("## 📮 Postal Code Boundaries")
+        
+        col_ctrl, col_map = st.columns([1, 2.5], gap="medium")
+        
+        with col_ctrl:
+            with st.container(border=True):
+                st.subheader("1. Data Source")
+                # ID from your provided drive link
+                postal_id = "1RpFUgIGi_KGCYiCnk2X5BMHs4ZeV-OLg"
+                
+                if st.session_state['postal_gdf'] is None:
+                    if st.button("Load Postal Boundaries", type="primary", use_container_width=True):
+                        with st.spinner("Downloading Postal Data... (This may take a moment)"):
+                            # This handles the specific file from Drive
+                            gdf = load_file_from_url(f"https://drive.google.com/uc?id={postal_id}", is_gdrive=True)
+                            if gdf is not None:
+                                st.session_state['postal_gdf'] = gdf
+                                st.toast("Postal Data Loaded!", icon="📮")
+                            else:
+                                st.error("Failed to load Postal Data.")
+                else:
+                    st.success("Postal Data Loaded.")
+                    if st.button("Reload Data"):
+                        st.session_state['postal_gdf'] = None
+                        st.rerun()
 
-    # --- 2. RIVER DOWNLOADER MODULE ---
+            if st.session_state['postal_gdf'] is not None:
+                pgdf = st.session_state['postal_gdf']
+                
+                with st.container(border=True):
+                    st.subheader("2. Filter Location")
+                    # Columns based on your screenshot: Circle, Region, Division, Pincode
+                    
+                    # 1. Circle (State Level)
+                    circles = sorted(pgdf['Circle'].dropna().astype(str).unique())
+                    sel_circle = st.selectbox("Select Circle", ["All"] + circles)
+                    
+                    filtered_pgdf = pgdf
+                    if sel_circle != "All":
+                        filtered_pgdf = pgdf[pgdf['Circle'] == sel_circle]
+                        
+                        # 2. Region
+                        regions = sorted(filtered_pgdf['Region'].dropna().astype(str).unique())
+                        sel_region = st.selectbox("Select Region", ["All"] + regions)
+                        
+                        if sel_region != "All":
+                            filtered_pgdf = filtered_pgdf[filtered_pgdf['Region'] == sel_region]
+                            
+                            # 3. Division
+                            divisions = sorted(filtered_pgdf['Division'].dropna().astype(str).unique())
+                            sel_div = st.selectbox("Select Division", ["All"] + divisions)
+                            
+                            if sel_div != "All":
+                                filtered_pgdf = filtered_pgdf[filtered_pgdf['Division'] == sel_div]
+                                
+                                # 4. Pincode
+                                pincodes = sorted(filtered_pgdf['Pincode'].dropna().astype(str).unique())
+                                sel_pin = st.selectbox("Select Pincode", ["All"] + pincodes)
+                                
+                                if sel_pin != "All":
+                                    filtered_pgdf = filtered_pgdf[filtered_pgdf['Pincode'].astype(str) == str(sel_pin)]
+
+                    st.markdown(f"**Found:** `{len(filtered_pgdf)}` postal boundaries")
+
+                    st.divider()
+                    st.subheader("3. Download")
+                    fmt = st.selectbox("Format", ["ESRI Shapefile (.zip)", "GeoJSON", "KML", "GeoPackage"], key="postal_fmt")
+                    
+                    fname = "Postal_Export"
+                    if sel_circle != "All": fname = f"Postal_{sel_circle}"
+                    if sel_pin != "All": fname = f"Pincode_{sel_pin}"
+                    
+                    if st.button("Download Data", use_container_width=True):
+                        d, e, m = handle_export(filtered_pgdf, fmt, fname)
+                        if d: st.download_button("Save File", d, f"{fname}{e}", m, use_container_width=True)
+
+        with col_map:
+            current_postal = locals().get('filtered_pgdf', st.session_state['postal_gdf'])
+            st.markdown("### Map View")
+            show_postal_map = st.toggle("Show Geometry on Map", value=True)
+            render_map([(current_postal, "Postal Boundaries", "#FF5733")], height=550, show_geometries=show_postal_map)
+            
+            if current_postal is not None:
+                with st.expander("📊 View Attribute Table"):
+                    st.dataframe(current_postal.drop(columns='geometry', errors='ignore'), use_container_width=True)
+
+    # --- 3. RIVER DOWNLOADER MODULE ---
     elif selected == "Rivers":
         st.markdown("## 🌊 River Network Analysis")
         col_ctrl, col_map = st.columns([1, 2.5], gap="medium")
@@ -474,7 +580,7 @@ def main():
             render_map([(selected_river, "River Flow", "#00E5FF")], height=550, show_geometries=show_river_map)
 
 
-    # --- 3. FORMAT CONVERTER MODULE ---
+    # --- 4. FORMAT CONVERTER MODULE ---
     elif selected == "Converter":
         st.markdown("## 🔄 Universal Format Converter")
         
@@ -534,7 +640,7 @@ def main():
                 show_conv_map = st.toggle("Show Geometry on Map", value=True)
                 render_map([(gdf, "Converted Data", "#FF4B4B")], height=550, show_geometries=show_conv_map)
 
-    # --- 4. VECTOR CALCULATOR MODULE ---
+    # --- 5. VECTOR CALCULATOR MODULE ---
     elif selected == "Vector Calculator":
         st.markdown("## 🧮 Vector Operations")
         
