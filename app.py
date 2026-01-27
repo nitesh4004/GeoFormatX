@@ -26,7 +26,6 @@ fiona.drvsupport.supported_drivers['KML'] = 'rw'
 fiona.drvsupport.supported_drivers['LIBKML'] = 'rw'
 
 # Session State Initialization
-# Added 'parliament_gdf' to the keys
 keys = ['main_gdf', 'secondary_gdf', 'calc_result_gdf', 'calc_result_name', 'river_gdf', 'postal_gdf', 'parliament_gdf']
 for k in keys:
     if k not in st.session_state:
@@ -286,6 +285,13 @@ def handle_export(gdf, output_format, file_prefix="export"):
                 gdf.to_file(path, driver="GPKG")
                 with open(path, "rb") as f: final_data = BytesIO(f.read())
                 file_ext, mime_type = ".gpkg", "application/x-sqlite3"
+            elif "WKT" in output_format:
+                path = os.path.join(out_dir, f"{file_prefix}.csv")
+                # When converting GeoDataFrame to CSV, geometry is automatically converted to WKT format
+                gdf.to_csv(path, index=False)
+                with open(path, "rb") as f: final_data = BytesIO(f.read())
+                file_ext, mime_type = ".csv", "text/csv"
+
             return final_data, file_ext, mime_type
         except Exception as e:
             st.error(f"Export failed: {str(e)}")
@@ -413,7 +419,7 @@ def main():
                             export_filename = f"{sel_sub}_Entire_Subdistrict"
                             st.caption(f"Will download all {len(export_gdf)} villages in {sel_sub}.")
 
-                    fmt = st.selectbox("Format", ["ESRI Shapefile (.zip)", "GeoJSON", "KML", "GeoPackage"])
+                    fmt = st.selectbox("Format", ["ESRI Shapefile (.zip)", "GeoJSON", "KML", "GeoPackage", "WKT (CSV)"])
                     if st.button("Download Selection", use_container_width=True):
                         d, e, m = handle_export(export_gdf, fmt, export_filename)
                         if d: st.download_button("Save File", d, f"{export_filename}{e}", m, use_container_width=True)
@@ -477,7 +483,7 @@ def main():
 
                     st.divider()
                     st.subheader("3. Download")
-                    fmt = st.selectbox("Format", ["ESRI Shapefile (.zip)", "GeoJSON", "KML", "GeoPackage"], key="postal_fmt")
+                    fmt = st.selectbox("Format", ["ESRI Shapefile (.zip)", "GeoJSON", "KML", "GeoPackage", "WKT (CSV)"], key="postal_fmt")
                     
                     fname = "Postal_Export"
                     if sel_pin != "All":
@@ -568,7 +574,7 @@ def main():
                     
                     st.divider()
                     st.subheader("3. Download")
-                    fmt = st.selectbox("Format", ["ESRI Shapefile (.zip)", "GeoJSON", "KML", "GeoPackage"], key="parl_fmt")
+                    fmt = st.selectbox("Format", ["ESRI Shapefile (.zip)", "GeoJSON", "KML", "GeoPackage", "WKT (CSV)"], key="parl_fmt")
                     
                     fname = "Parliament_Export"
                     if sel_pc != "All": fname = f"{sel_pc}_Constituency"
@@ -623,7 +629,7 @@ def main():
                     
                     st.divider()
                     st.subheader("Download")
-                    fmt = st.selectbox("Format", ["ESRI Shapefile (.zip)", "GeoJSON", "KML", "GeoPackage"])
+                    fmt = st.selectbox("Format", ["ESRI Shapefile (.zip)", "GeoJSON", "KML", "GeoPackage", "WKT (CSV)"])
                     if st.button("Download River Data", use_container_width=True):
                         fname = f"{sel_river}_{sel_basin}".replace(" ","_")
                         d, e, m = handle_export(selected_river, fmt, fname)
@@ -686,7 +692,7 @@ def main():
                         st.toast(f"Reprojected to EPSG:{target_crs}", icon="🔄")
                     
                     st.divider()
-                    target_fmt = st.selectbox("Output Format", ["GeoJSON", "ESRI Shapefile (.zip)", "KML", "GeoPackage"])
+                    target_fmt = st.selectbox("Output Format", ["GeoJSON", "ESRI Shapefile (.zip)", "KML", "GeoPackage", "WKT (CSV)"])
                     
                     if st.button("Convert & Download", type="primary", use_container_width=True):
                         d, e, m = handle_export(gdf, target_fmt, "converted_data")
@@ -803,7 +809,7 @@ def main():
                 with st.container(border=True):
                     c1, c2 = st.columns([2, 1])
                     with c1:
-                          out_fmt = st.selectbox("Export Result As", ["GeoJSON", "ESRI Shapefile (.zip)", "KML", "GeoPackage"])
+                          out_fmt = st.selectbox("Export Result As", ["GeoJSON", "ESRI Shapefile (.zip)", "KML", "GeoPackage", "WKT (CSV)"])
                     with c2:
                           st.write("") 
                           st.write("") 
