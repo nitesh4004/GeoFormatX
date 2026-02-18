@@ -200,7 +200,7 @@ def convert_crs(gdf, target_epsg):
 
 def render_map(gdf_list, height=550, show_geometries=False):
     """
-    Renders interactive Folium map.
+    Renders interactive Folium map with RED OUTLINE ONLY (No Fill).
     """
     m = folium.Map(location=[20.5937, 78.9629], zoom_start=4, tiles=None)
 
@@ -223,7 +223,8 @@ def render_map(gdf_list, height=550, show_geometries=False):
             bounds = display_gdf.total_bounds
             m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
             
-            for gdf, name, color in gdf_list:
+            # Note: We are ignoring the 'color' passed in gdf_list to enforce Red Outline
+            for gdf, name, _ in gdf_list:
                 if gdf is not None and not gdf.empty:
                     if gdf.crs != "EPSG:4326": 
                         gdf_display = gdf.to_crs(epsg=4326)
@@ -235,11 +236,11 @@ def render_map(gdf_list, height=550, show_geometries=False):
                     folium.GeoJson(
                         gdf_display,
                         name=name,
-                        style_function=lambda x, color=color: {
-                            'fillColor': color, 
-                            'color': color, 
-                            'weight': 2, 
-                            'fillOpacity': 0.5 
+                        style_function=lambda x: {
+                            'fillColor': 'transparent', # No fill color
+                            'color': 'red',             # Red outline
+                            'weight': 2,                # Outline thickness
+                            'fillOpacity': 0            # Ensure transparency
                         },
                         tooltip=folium.GeoJsonTooltip(fields=tooltip_cols) if tooltip_cols else None
                     ).add_to(m)
