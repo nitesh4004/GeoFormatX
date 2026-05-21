@@ -140,7 +140,8 @@ def load_file_from_url(url, is_gdrive=False):
     
     try:
         if is_gdrive:
-            gdown.download(url, file_path, quiet=True, fuzzy=True)
+            # Fixed: Removed the 'fuzzy' keyword argument which is unsupported in newer gdown versions
+            gdown.download(url, file_path, quiet=True)
         else:
             response = requests.get(url, stream=True)
             if response.status_code != 200: return None
@@ -288,7 +289,6 @@ def handle_export(gdf, output_format, file_prefix="export"):
                 file_ext, mime_type = ".gpkg", "application/x-sqlite3"
             elif "WKT" in output_format:
                 path = os.path.join(out_dir, f"{file_prefix}.csv")
-                # When converting GeoDataFrame to CSV, geometry is automatically converted to WKT format
                 gdf.to_csv(path, index=False)
                 with open(path, "rb") as f: final_data = BytesIO(f.read())
                 file_ext, mime_type = ".csv", "text/csv"
@@ -473,7 +473,6 @@ def main():
                 with st.container(border=True):
                     st.subheader("2. Filter Location")
                     
-                    # Direct Search Only
                     all_pincodes = sorted(pgdf['Pincode'].dropna().astype(str).unique())
                     sel_pin = st.selectbox("Search Pincode", ["All"] + all_pincodes)
                     
@@ -534,7 +533,6 @@ def main():
                 df = st.session_state['parliament_gdf']
                 filtered_df = df
                 
-                # Initialize variables
                 sel_state = "All"
                 sel_pc = "All"
                 sel_code = "All"
@@ -543,28 +541,24 @@ def main():
                 with st.container(border=True):
                     st.subheader("2. Filter Constituency")
                     
-                    # 1. Filter by State (ST_NAME)
                     states = sorted(df['ST_NAME'].dropna().astype(str).unique())
                     sel_state = st.selectbox("Select State (ST_NAME)", ["All"] + states)
                     
                     if sel_state != "All":
                         filtered_df = filtered_df[filtered_df['ST_NAME'] == sel_state]
                     
-                    # 2. Filter by Reservation (Res)
                     res_types = sorted(filtered_df['Res'].dropna().astype(str).unique())
                     sel_res = st.selectbox("Reservation Status", ["All"] + res_types)
                     
                     if sel_res != "All":
                         filtered_df = filtered_df[filtered_df['Res'] == sel_res]
 
-                    # 3. Filter by PC Name (PC_NAME)
                     pc_names = sorted(filtered_df['PC_NAME'].dropna().astype(str).unique())
                     sel_pc = st.selectbox("Select Constituency (PC_NAME)", ["All"] + pc_names)
                     
                     if sel_pc != "All":
                         filtered_df = filtered_df[filtered_df['PC_NAME'] == sel_pc]
                         
-                    # 4. Filter by PC Code (PC_CODE)
                     pc_codes = sorted(filtered_df['PC_CODE'].dropna().astype(str).unique())
                     sel_code = st.selectbox("Select PC Code", ["All"] + pc_codes)
                     
@@ -594,7 +588,6 @@ def main():
             if current_parl is not None:
                 with st.expander("📊 View Attribute Table"):
                     st.dataframe(current_parl.drop(columns='geometry', errors='ignore'), use_container_width=True)
-
 
     # --- 4. RIVER DOWNLOADER MODULE ---
     elif selected == "Rivers":
@@ -641,7 +634,6 @@ def main():
         with col_map:
             show_river_map = st.toggle("Show River on Map", value=True)
             render_map([(selected_river, "River Flow", "#00E5FF")], height=550, show_geometries=show_river_map)
-
 
     # --- 5. FORMAT CONVERTER MODULE ---
     elif selected == "Converter":
@@ -742,8 +734,8 @@ def main():
                 if tool == "Buffer": params['dist'] = st.number_input("Distance (Map Units)", value=0.01, format="%.4f")
                 elif tool == "Simplify": params['tol'] = st.number_input("Tolerance", value=0.001, format="%.4f")
                 elif tool == "Dissolve" and st.session_state['main_gdf'] is not None:
-                      cols = ["All"] + list(st.session_state['main_gdf'].columns)
-                      params['col'] = st.selectbox("Dissolve Field", cols)
+                     cols = ["All"] + list(st.session_state['main_gdf'].columns)
+                     params['col'] = st.selectbox("Dissolve Field", cols)
                 elif tool == "Spatial Join": params['op'] = st.selectbox("Predicate", ["intersects", "contains", "within"])
                 elif tool == "Reproject": params['epsg'] = st.number_input("Target EPSG", value=3857)
 
@@ -810,12 +802,12 @@ def main():
                 with st.container(border=True):
                     c1, c2 = st.columns([2, 1])
                     with c1:
-                          out_fmt = st.selectbox("Export Result As", ["GeoJSON", "ESRI Shapefile (.zip)", "KML", "GeoPackage", "WKT (CSV)"])
+                         out_fmt = st.selectbox("Export Result As", ["GeoJSON", "ESRI Shapefile (.zip)", "KML", "GeoPackage", "WKT (CSV)"])
                     with c2:
-                          st.write("") 
-                          st.write("") 
-                          d, e, m = handle_export(st.session_state['calc_result_gdf'], out_fmt, "analysis_result")
-                          if d: st.download_button("Download Result", d, f"result{e}", m, use_container_width=True, type="primary")
+                         st.write("") 
+                         st.write("") 
+                         d, e, m = handle_export(st.session_state['calc_result_gdf'], out_fmt, "analysis_result")
+                         if d: st.download_button("Download Result", d, f"result{e}", m, use_container_width=True, type="primary")
 
 if __name__ == "__main__":
     main()
