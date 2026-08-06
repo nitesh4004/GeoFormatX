@@ -19,6 +19,14 @@ Eliminate manual GIS format conversion workflows. GeoFormatX handles shapefile, 
 
 ## ✨ **Key Features**
 
+### **🌾 Ground Truth (GT) App Export Converter**
+
+- **App Export Support**: Merges `fields.geojson` boundaries and `fields.csv` survey questionnaires exported from field survey apps.
+- **FIELD ID Ordering**: Automatically sorts field placemarks sequentially by `FIELD ID` (e.g. `FLD-01ZzlUn7`, `FLD-344pLqRb`, `FLD-7W25Tqu1`).
+- **Placemark Naming**: Custom placemark naming (`FIELD ID - Farmer Name`).
+- **HTML Popup Cards**: Unpacks survey response pairs (Crop, Variety, Stage, Health, Sowing Date, Harvest Date, Irrigation, Soil Type, Area in Acres/SqM, Remarks) into clean styled HTML table popups for Google Earth and QGIS.
+- **Dual Export**: Exports formatted `.kml` and cleaned `.csv` with centroid coordinates and acreage calculations.
+
 ### **📄 Vector Format Support**
 
 - **Input Formats**: Shapefile, GeoJSON, GeoPackage, KML/KMZ, GML, PostGIS
@@ -84,19 +92,20 @@ pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
-### **API Usage**
+### **API / Streamlit Usage**
 
 ```python
-# Convert Shapefile to GeoJSON
-import requests
+# Convert GeoJSON to KML
+import geopandas as gpd
 
-files = {'file': open('roads.shp', 'rb')}
-data = {'output_format': 'geojson', 'crs_out': 'EPSG:4326'}
+gdf = gpd.read_file('input_data.geojson')
+# GeoFormatX automatically reprojects to EPSG:4326 for KML compatibility
+gdf.to_file('output_data.kml', driver='KML')
+```
 
-response = requests.post('http://localhost:8000/convert', 
-                        files=files, data=data)
-result = response.json()
-print(result['download_url'])
+```bash
+# Launch GeoFormatX Interactive Web UI
+streamlit run app.py
 ```
 
 ---

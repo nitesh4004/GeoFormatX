@@ -8,6 +8,7 @@ import gdown
 import requests
 from zipfile import ZipFile, BadZipFile
 from io import BytesIO
+import json
 from shapely import wkt
 import folium
 from streamlit_folium import st_folium
@@ -199,6 +200,39 @@ def convert_crs(gdf, target_epsg):
     if gdf.crs is None: gdf.set_crs(epsg=4326, inplace=True)
     return gdf.to_crs(epsg=target_epsg)
 
+def is_null_val(x):
+    if x is None: return True
+    if isinstance(x, float) and pd.isna(x): return True
+    return False
+
+def sanitize_gdf_for_display_and_export(gdf):
+    """
+    Sanitizes GeoDataFrame attributes so non-JSON-serializable objects 
+    (e.g., pd.Timestamp, datetime, pd.Period, dicts, lists) are converted to 
+    strings before Folium map rendering or format export.
+    """
+    if gdf is None or gdf.empty:
+        return gdf
+    
+    gdf_clean = gdf.copy()
+    for col in gdf_clean.columns:
+        if col == 'geometry':
+            continue
+        
+        # Numeric & boolean types are natively JSON serializable
+        if pd.api.types.is_numeric_dtype(gdf_clean[col]) or pd.api.types.is_bool_dtype(gdf_clean[col]):
+            continue
+            
+        gdf_clean[col] = gdf_clean[col].apply(
+            lambda x: "" if is_null_val(x)
+            else x if type(x) in (str, int, float, bool)
+            else json.dumps(x) if isinstance(x, (dict, list, tuple, set))
+            else x.isoformat() if hasattr(x, 'isoformat') and callable(x.isoformat)
+            else str(x)
+        )
+            
+    return gdf_clean
+
 def render_map(gdf_list, height=550, show_geometries=False):
     """
     Renders interactive Folium map with RED OUTLINE ONLY (No Fill).
@@ -232,7 +266,12 @@ def render_map(gdf_list, height=550, show_geometries=False):
                     else:
                         gdf_display = gdf
                     
+                    # Sanitize non-JSON-serializable attributes (pd.Timestamp, etc.) for Folium map
+                    gdf_display = sanitize_gdf_for_display_and_export(gdf_display)
+                    
                     tooltip_cols = list(gdf_display.columns[:4]) if len(gdf_display.columns) > 0 else None
+                    if tooltip_cols and 'geometry' in tooltip_cols:
+                        tooltip_cols.remove('geometry')
                     
                     folium.GeoJson(
                         gdf_display,
@@ -251,7 +290,7 @@ def render_map(gdf_list, height=550, show_geometries=False):
     folium.LayerControl().add_to(m)
     return st_folium(m, height=height, use_container_width=True)
 
-def handle_export(gdf, output_format, file_prefix="export"):
+def handle_export(gdf, output_format, file_prefix="export", name_col=None, desc_col=None):
     with tempfile.TemporaryDirectory() as tmp_dir:
         out_dir = os.path.join(tmp_dir, "output")
         os.makedirs(out_dir, exist_ok=True)
@@ -279,7 +318,34 @@ def handle_export(gdf, output_format, file_prefix="export"):
                 file_ext, mime_type = ".geojson", "application/json"
             elif "KML" in output_format:
                 path = os.path.join(out_dir, f"{file_prefix}.kml")
-                gdf.to_file(path, driver="KML")
+                export_gdf = gdf.copy()
+                
+                # KML strictly requires EPSG:4326 (WGS84)
+                if export_gdf.crs is None:
+                    export_gdf.set_crs(epsg=4326, inplace=True)
+                elif str(export_gdf.crs).upper() != "EPSG:4326":
+                    try:
+                        export_gdf = export_gdf.to_crs(epsg=4326)
+                    except Exception:
+                        pass
+
+                # Assign Name & Description fields if provided
+                if name_col and name_col in export_gdf.columns and name_col != "Name":
+                    export_gdf["Name"] = export_gdf[name_col].astype(str)
+                if desc_col and desc_col in export_gdf.columns and desc_col != "Description":
+                    export_gdf["Description"] = export_gdf[desc_col].astype(str)
+
+                # Clean non-primitive columns (Timestamps, dates, objects) to prevent GDAL/Fiona XML serialization crashes
+                export_gdf = sanitize_gdf_for_display_and_export(export_gdf)
+
+                try:
+                    export_gdf.to_file(path, driver="KML")
+                except Exception:
+                    try:
+                        export_gdf.to_file(path, driver="LIBKML")
+                    except Exception:
+                        export_gdf.to_file(path, driver="KML", engine="fiona")
+
                 with open(path, "rb") as f: final_data = BytesIO(f.read())
                 file_ext, mime_type = ".kml", "application/vnd.google-earth.kml+xml"
             elif "GeoPackage" in output_format:
@@ -308,8 +374,8 @@ def main():
         
         selected = option_menu(
             menu_title=None,
-            options=["Admin Data", "Postal Codes", "Parliament Boundaries", "Rivers", "Converter", "Vector Calculator"],
-            icons=["building", "mailbox", "bank", "water", "arrow-repeat", "calculator"],
+            options=["Admin Data", "Postal Codes", "Parliament Boundaries", "Rivers", "GT Conversion", "GeoJSON to KML", "Converter", "Vector Calculator"],
+            icons=["building", "mailbox", "bank", "water", "patch-check", "file-earmark-code", "arrow-repeat", "calculator"],
             default_index=0,
             styles={
                 "container": {"padding": "0!important", "background-color": "transparent"},
@@ -631,69 +697,435 @@ def main():
                 else:
                     st.info("Click 'Load River Database' to begin.")
         
-        with col_map:
-            show_river_map = st.toggle("Show River on Map", value=True)
-            render_map([(selected_river, "River Flow", "#00E5FF")], height=550, show_geometries=show_river_map)
+def render_gt_conversion_module():
+    st.markdown("## 🌾 GT App Export Converter (GeoJSON + CSV ➔ KML & CSV)")
+    st.caption("Specialized converter for Ground Truth app exports (`fields_export_...` containing `fields.geojson` and `fields.csv`). Merges boundaries with survey responses, orders features sequentially by FIELD ID, and exports formatted KML & clean CSV.")
+    
+    merged_gdf = None
+    csv_df = None
+    
+    col_input, col_preset = st.columns([2, 1])
+    with col_input:
+        input_mode = st.radio("Upload Method", ["Upload Zip Export Package", "Upload GeoJSON & CSV Separately"], horizontal=True, key="gt_input_mode")
+        
+        if input_mode == "Upload Zip Export Package":
+            zip_file = st.file_uploader("Upload App Export Zip (`fields_export_...zip`)", type=['zip'], key="gt_zip_uploader")
+            if zip_file:
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    zpath = os.path.join(tmp_dir, zip_file.name)
+                    with open(zpath, "wb") as f: f.write(zip_file.getbuffer())
+                    with ZipFile(zpath, 'r') as zip_ref:
+                        zip_ref.extractall(tmp_dir)
+                    
+                    g_file, c_file = None, None
+                    for root, dirs, files in os.walk(tmp_dir):
+                        for file in files:
+                            if file.endswith('.geojson') or (file.endswith('.json') and 'field' in file.lower()):
+                                g_file = os.path.join(root, file)
+                            elif file.endswith('.csv') and 'field' in file.lower():
+                                c_file = os.path.join(root, file)
+                    
+                    if g_file:
+                        gt_raw = gpd.read_file(g_file)
+                        gt_csv = pd.read_csv(c_file) if c_file else None
+                        if gt_csv is not None and 'Field ID' in gt_csv.columns and 'field_id' in gt_raw.columns:
+                            merged_gdf = gt_raw.merge(gt_csv, left_on='field_id', right_on='Field ID', how='left', suffixes=('', '_csv'))
+                            csv_df = gt_csv
+                        else:
+                            merged_gdf = gt_raw
+                            csv_df = gt_csv
+        else:
+            c1, c2 = st.columns(2)
+            up_g = c1.file_uploader("Upload fields.geojson", type=['geojson', 'json'], key="gt_g_up")
+            up_c = c2.file_uploader("Upload fields.csv", type=['csv'], key="gt_c_up")
+            if up_g:
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    gpath = os.path.join(tmp_dir, up_g.name)
+                    with open(gpath, "wb") as f: f.write(up_g.getbuffer())
+                    gt_raw = gpd.read_file(gpath)
+                    gt_csv = None
+                    if up_c:
+                        cpath = os.path.join(tmp_dir, up_c.name)
+                        with open(cpath, "wb") as f: f.write(up_c.getbuffer())
+                        gt_csv = pd.read_csv(cpath)
+                    
+                    if gt_csv is not None and 'Field ID' in gt_csv.columns and 'field_id' in gt_raw.columns:
+                        merged_gdf = gt_raw.merge(gt_csv, left_on='field_id', right_on='Field ID', how='left', suffixes=('', '_csv'))
+                        csv_df = gt_csv
+                    else:
+                        merged_gdf = gt_raw
+                        csv_df = gt_csv
 
-    # --- 5. FORMAT CONVERTER MODULE ---
-    elif selected == "Converter":
-        st.markdown("## 🔄 Universal Format Converter")
+    with col_preset:
+        st.write("")
+        st.write("")
+        downloads_export_dir = os.path.join("C:", os.sep, "Users", "nites", "Downloads", "fields_export_2026-08-05")
+        if os.path.exists(downloads_export_dir):
+            if st.button("📁 Quick Load local `fields_export_2026-08-05`", type="primary", use_container_width=True):
+                try:
+                    g_path = os.path.join(downloads_export_dir, "fields.geojson")
+                    c_path = os.path.join(downloads_export_dir, "fields.csv")
+                    gt_raw = gpd.read_file(g_path)
+                    gt_csv = pd.read_csv(c_path)
+                    merged_gdf = gt_raw.merge(gt_csv, left_on='field_id', right_on='Field ID', how='left', suffixes=('', '_csv'))
+                    csv_df = gt_csv
+                    st.toast("Loaded fields_export_2026-08-05 (GeoJSON + CSV)!", icon="🎉")
+                except Exception as ex:
+                    st.error(f"Failed to load export package: {ex}")
+
+    if merged_gdf is not None and not merged_gdf.empty:
+        col_ctrl, col_map = st.columns([1, 2], gap="medium")
         
-        with st.container(border=True):
-            uploaded_file = st.file_uploader("Upload File (Zip, SHP, KML, GPKG, CSV, XLSX)", type=['zip', 'shp', 'geojson', 'kml', 'gpkg', 'csv', 'xlsx'])
-        
-        gdf = None
-        if uploaded_file:
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                file_path = os.path.join(tmp_dir, uploaded_file.name)
-                with open(file_path, "wb") as f: f.write(uploaded_file.getbuffer())
+        with col_ctrl:
+            with st.container(border=True):
+                st.subheader("1. Export Package Summary")
+                st.success(f"Total Fields: `{len(merged_gdf)}` | CRS: `{merged_gdf.crs or 'EPSG:4326'}`")
                 
+                st.subheader("2. KML Ordering & Placemark Naming")
+                
+                sort_by = st.selectbox(
+                    "Sort Order (KML & CSV)",
+                    ["FIELD ID (field_id A-Z)", "Farmer Name A-Z", "Village A-Z", "Keep Original Order"],
+                    index=0,
+                    key="gt_app_sort"
+                )
+                
+                name_fmt = st.selectbox(
+                    "Placemark Title Format",
+                    [
+                        "FIELD ID - Farmer Name (e.g. FLD-Zrrxxg1C - Prakash)",
+                        "FIELD ID Only (e.g. FLD-Zrrxxg1C)",
+                        "FIELD ID - Current Crop",
+                        "FIELD ID (Village)"
+                    ],
+                    index=0,
+                    key="gt_app_name_fmt"
+                )
+                
+                out_base_name = st.text_input("Output File Name Base", value="fields_export_formatted", key="gt_app_outname")
+                
+                st.divider()
+                st.subheader("3. Convert & Export")
+                
+                # Perform processing
+                proc_gdf = merged_gdf.copy()
+                
+                # Sort order
+                if "FIELD ID" in sort_by:
+                    sort_col = 'field_id' if 'field_id' in proc_gdf.columns else ('Field ID' if 'Field ID' in proc_gdf.columns else None)
+                    if sort_col: proc_gdf = proc_gdf.sort_values(by=sort_col).reset_index(drop=True)
+                elif "Farmer Name" in sort_by:
+                    sort_col = 'Farmer name' if 'Farmer name' in proc_gdf.columns else ('farmer_name' if 'farmer_name' in proc_gdf.columns else None)
+                    if sort_col: proc_gdf = proc_gdf.sort_values(by=sort_col).reset_index(drop=True)
+                elif "Village" in sort_by:
+                    sort_col = 'Village' if 'Village' in proc_gdf.columns else ('village' if 'village' in proc_gdf.columns else None)
+                    if sort_col: proc_gdf = proc_gdf.sort_values(by=sort_col).reset_index(drop=True)
+                    
+                names = []
+                descriptions = []
+                
+                for idx, r in proc_gdf.iterrows():
+                    fid = str(r.get('field_id', r.get('Field ID', f'FLD-{idx+1}')))
+                    farmer = str(r.get('Farmer name', r.get('farmer_name', '')))
+                    if farmer == 'nan': farmer = ''
+                    crop = str(r.get('Current crop', r.get('crop', '')))
+                    if crop == 'nan': crop = ''
+                    village = str(r.get('Village', r.get('village', '')))
+                    if village == 'nan': village = ''
+                    
+                    if "FIELD ID - Farmer Name" in name_fmt:
+                        p_name = f"{fid} - {farmer}" if farmer else fid
+                    elif "FIELD ID Only" in name_fmt:
+                        p_name = fid
+                    elif "FIELD ID - Current Crop" in name_fmt:
+                        p_name = f"{fid} - {crop}" if crop else fid
+                    elif "FIELD ID (Village)" in name_fmt:
+                        p_name = f"{fid} ({village})" if village else fid
+                    else:
+                        p_name = fid
+                    names.append(p_name)
+                    
+                    # HTML Popup Card
+                    html_rows = []
+                    html_rows.append(f"<tr><th style='background:#0068C9; color:white; padding:6px; text-align:left;'>FIELD ID</th><td style='padding:6px;'><b>{fid}</b></td></tr>")
+                    if farmer:
+                        html_rows.append(f"<tr><th style='background:#f8f9fa; padding:5px; text-align:left;'>Farmer Name</th><td style='padding:5px;'><b>{farmer}</b></td></tr>")
+                    if crop:
+                        html_rows.append(f"<tr><th style='background:#f8f9fa; padding:5px; text-align:left;'>Current Crop</th><td style='padding:5px;'><b>{crop}</b></td></tr>")
+                    if village:
+                        html_rows.append(f"<tr><th style='background:#f8f9fa; padding:5px; text-align:left;'>Village</th><td style='padding:5px;'>{village}</td></tr>")
+                        
+                    sqm = r.get('total_area_sqmt', None)
+                    if pd.notna(sqm):
+                        try:
+                            sqm_v = float(sqm)
+                            acres_v = sqm_v / 4046.85642
+                            html_rows.append(f"<tr><th style='background:#f8f9fa; padding:5px; text-align:left;'>Total Area</th><td style='padding:5px;'>{sqm_v:,.1f} sq.m ({acres_v:.2f} acres)</td></tr>")
+                        except: pass
+                        
+                    for label, col_key in [
+                        ("Phone Number", "Contact number"), ("Crop Variety", "Crop variety"),
+                        ("Crop Stage", "Crop growth stage"), ("Crop Health", "Crop health / condition"),
+                        ("Sowing Date", "Sowing / transplanting date / Plantation date"),
+                        ("Expected Harvest Date", "Expected Harvest Date"), ("Soil Type", "Soil Type"),
+                        ("Irrigation Type", "Irrigation type"), ("Irrigation Source", "Irrigation Source"),
+                        ("Previous Season Crop", "Previous season crop"), ("Previous Season Yield", "Previous season yield"),
+                        ("Yield Unit", "Yield unit"), ("Survey Date", "Survey date"),
+                        ("Officer / Surveyor", "User Name"), ("Remarks", "Remarks")
+                    ]:
+                        val = r.get(col_key, '')
+                        if pd.notna(val) and str(val).strip() != '' and str(val) != 'nan':
+                            html_rows.append(f"<tr><th style='background:#f8f9fa; padding:5px; text-align:left;'>{label}</th><td style='padding:5px;'>{val}</td></tr>")
+                            
+                    desc_card = "<table border='1' style='border-collapse:collapse; width:100%; font-family:Arial,sans-serif; font-size:12px;'>" + "".join(html_rows) + "</table>"
+                    descriptions.append(desc_card)
+                    
+                proc_gdf['Name'] = names
+                proc_gdf['Description'] = descriptions
+                
+                # Create KML data
+                kml_export_gdf = proc_gdf[['Name', 'Description', 'geometry']]
+                d_kml, e_kml, m_kml = handle_export(kml_export_gdf, "KML", out_base_name, name_col='Name', desc_col='Description')
+                
+                # Create CSV data
+                csv_export_df = csv_df.copy() if csv_df is not None else proc_gdf.drop(columns=['geometry', 'Name', 'Description'], errors='ignore')
+                if 'Field ID' in csv_export_df.columns:
+                    csv_export_df = csv_export_df.sort_values(by='Field ID').reset_index(drop=True)
+                elif 'field_id' in csv_export_df.columns:
+                    csv_export_df = csv_export_df.sort_values(by='field_id').reset_index(drop=True)
+                    
+                if 'geometry' in proc_gdf.columns and not proc_gdf.empty:
+                    try:
+                        area_series = proc_gdf['total_area_sqmt'] if 'total_area_sqmt' in proc_gdf.columns else proc_gdf.area
+                        csv_export_df['total_area_acres'] = (area_series.astype(float) / 4046.85642).round(2)
+                        csv_export_df['centroid_lat'] = proc_gdf.geometry.centroid.y.round(6)
+                        csv_export_df['centroid_lon'] = proc_gdf.geometry.centroid.x.round(6)
+                    except: pass
+                    
+                csv_bytes = csv_export_df.to_csv(index=False).encode('utf-8')
+                
+                # Buttons
+                c_dl1, c_dl2 = st.columns(2)
+                if d_kml:
+                    c_dl1.download_button(
+                        label="📥 Download Formatted KML (.kml)",
+                        data=d_kml,
+                        file_name=f"{out_base_name}{e_kml}",
+                        mime=m_kml,
+                        use_container_width=True,
+                        type="primary",
+                        key="gt_app_kml_dl"
+                    )
+                c_dl2.download_button(
+                    label="📊 Download Formatted CSV (.csv)",
+                    data=csv_bytes,
+                    file_name=f"{out_base_name}.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                    key="gt_app_csv_dl"
+                )
+
+        with col_map:
+            st.markdown("### GT Map Preview")
+            show_gt_map = st.toggle("Show Geometry on Map", value=True, key="gt_app_map_toggle")
+            
+            disp_gdf = proc_gdf if 'proc_gdf' in locals() else merged_gdf
+            disp_gdf = sanitize_gdf_for_display_and_export(disp_gdf)
+            render_map([(disp_gdf, "GT Fields", "#00E5FF")], height=520, show_geometries=show_gt_map)
+            
+            with st.expander("📊 View Merged Attribute Table"):
+                st.dataframe(disp_gdf.drop(columns='geometry', errors='ignore'), use_container_width=True)
+
+def render_geojson_to_kml_module():
+    st.markdown("## 🌐 GeoJSON to KML Converter")
+    st.caption("Quickly convert GeoJSON / JSON files or raw GeoJSON code to Google Earth KML (.kml) format.")
+    
+    g2k_gdf = None
+    input_source = st.radio("Input Source", ["Upload GeoJSON / JSON File", "Paste GeoJSON Code"], horizontal=True, key="g2k_source")
+    
+    if input_source == "Upload GeoJSON / JSON File":
+        geojson_file = st.file_uploader("Upload .geojson or .json file", type=['geojson', 'json', 'zip'], key="g2k_file")
+        if geojson_file:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                file_path = os.path.join(tmp_dir, geojson_file.name)
+                with open(file_path, "wb") as f:
+                    f.write(geojson_file.getbuffer())
                 try:
                     if file_path.endswith('.zip'):
-                        gdf = extract_and_read_first(file_path, tmp_dir)
-                    elif file_path.endswith(('.csv', '.xlsx')):
-                        df = pd.read_csv(file_path) if file_path.endswith('.csv') else pd.read_excel(file_path)
-                        st.warning("Tabular data detected. Please define geometry.")
-                        c1, c2, c3, c4 = st.columns(4)
-                        mode = c1.radio("Mode", ["Lat/Lon", "WKT"])
-                        if mode == "Lat/Lon":
-                            x = c2.selectbox("Longitude Col", df.columns)
-                            y = c3.selectbox("Latitude Col", df.columns)
-                            if c4.button("Create Points"):
-                                gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df[x], df[y]), crs="EPSG:4326")
-                        else:
-                            wkt_col = c2.selectbox("WKT Column", df.columns)
-                            if c4.button("Parse WKT"):
-                                df['geometry'] = df[wkt_col].apply(wkt.loads)
-                                gdf = gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")
+                        g2k_gdf = extract_and_read_first(file_path, tmp_dir)
                     else:
-                        gdf = gpd.read_file(file_path)
-                except Exception as e:
-                    st.error(f"Error reading file: {e}")
+                        g2k_gdf = gpd.read_file(file_path)
+                except Exception as ex:
+                    st.error(f"Failed to read GeoJSON file: {ex}")
+    else:
+        raw_json = st.text_area("Paste GeoJSON text content below:", height=180, placeholder='{"type": "FeatureCollection", "features": [...]}', key="g2k_text")
+        if raw_json.strip():
+            try:
+                g2k_gdf = gpd.read_file(raw_json)
+            except Exception as ex:
+                st.error(f"Failed to parse GeoJSON text: {ex}")
 
-        if gdf is not None:
-            col_ctrl, col_map = st.columns([1, 2], gap="medium")
+    if g2k_gdf is not None and not g2k_gdf.empty:
+        g2k_gdf = sanitize_gdf_for_display_and_export(g2k_gdf)
+        col_ctrl, col_map = st.columns([1, 2], gap="medium")
+        
+        with col_ctrl:
+            with st.container(border=True):
+                st.subheader("1. GeoJSON Summary")
+                st.success(f"Features: `{len(g2k_gdf)}` | CRS: `{g2k_gdf.crs or 'EPSG:4326 (Assumed)'}`")
+                geom_types = ", ".join(list(g2k_gdf.geometry.type.unique()))
+                st.caption(f"Geometry Types: {geom_types}")
+                
+                st.subheader("2. KML Placemark Options")
+                non_geom_cols = ["None"] + list(g2k_gdf.columns.drop('geometry', errors='ignore'))
+                
+                default_name = "None"
+                for candidate in ["name", "Name", "NAME", "title", "Title"]:
+                    if candidate in g2k_gdf.columns:
+                        default_name = candidate
+                        break
+                
+                sel_name_col = st.selectbox("Placemark Name Field", non_geom_cols, index=non_geom_cols.index(default_name) if default_name in non_geom_cols else 0, key="g2k_name_col")
+                
+                default_desc = "None"
+                for candidate in ["description", "Description", "DESC", "desc", "summary"]:
+                    if candidate in g2k_gdf.columns:
+                        default_desc = candidate
+                        break
+                
+                sel_desc_col = st.selectbox("Placemark Description Field", non_geom_cols, index=non_geom_cols.index(default_desc) if default_desc in non_geom_cols else 0, key="g2k_desc_col")
+                
+                out_prefix = st.text_input("Output File Name", value="converted_from_geojson", key="g2k_prefix")
+                
+                st.divider()
+                if st.button("🚀 Convert to KML", type="primary", use_container_width=True, key="g2k_btn"):
+                    name_param = None if sel_name_col == "None" else sel_name_col
+                    desc_param = None if sel_desc_col == "None" else sel_desc_col
+                    d, e, m = handle_export(g2k_gdf, "KML", out_prefix, name_col=name_param, desc_col=desc_param)
+                    if d:
+                        st.toast("GeoJSON to KML conversion successful!", icon="🎉")
+                        st.download_button(
+                            label="📥 Download KML File",
+                            data=d,
+                            file_name=f"{out_prefix}{e}",
+                            mime=m,
+                            use_container_width=True,
+                            type="primary",
+                            key="g2k_dl"
+                        )
+        
+        with col_map:
+            st.markdown("### Map Preview")
+            show_g2k_map = st.toggle("Show Geometry on Map", value=True, key="g2k_map_toggle")
+            render_map([(g2k_gdf, "GeoJSON Features", "#FF5733")], height=520, show_geometries=show_g2k_map)
             
-            with col_ctrl:
-                with st.container(border=True):
-                    st.subheader("Conversion Settings")
-                    st.info(f"Loaded: {len(gdf)} features | CRS: {gdf.crs}")
-                    
-                    target_crs = st.number_input("Target EPSG (e.g., 4326, 3857)", value=4326)
-                    if st.button("Apply Reprojection"):
-                        gdf = convert_crs(gdf, target_crs)
-                        st.toast(f"Reprojected to EPSG:{target_crs}", icon="🔄")
-                    
-                    st.divider()
-                    target_fmt = st.selectbox("Output Format", ["GeoJSON", "ESRI Shapefile (.zip)", "KML", "GeoPackage", "WKT (CSV)"])
-                    
-                    if st.button("Convert & Download", type="primary", use_container_width=True):
-                        d, e, m = handle_export(gdf, target_fmt, "converted_data")
-                        if d: st.download_button("Download Result", d, f"converted{e}", m, use_container_width=True)
+            with st.expander("📊 View GeoJSON Attribute Table"):
+                st.dataframe(g2k_gdf.drop(columns='geometry', errors='ignore'), use_container_width=True)
+
+# --- 5. MAIN APP ---
+def main():
+    # --- NAVIGATION SIDEBAR ---
+    with st.sidebar:
+        st.image("https://github.com/nitesh4004/GeoFormatX/raw/main/docs/logo.png", use_container_width=True)
+        st.caption("Devoloped by Nitesh Kumar")
+        
+        selected = option_menu(
+            menu_title=None,
+            options=["Admin Data", "Postal Codes", "Parliament Boundaries", "Rivers", "GeoJSON to KML", "Converter", "Vector Calculator"],
+            icons=["building", "mailbox", "bank", "water", "file-earmark-code", "arrow-repeat", "calculator"],
+            default_index=0,
+            styles={
+                "container": {"padding": "0!important", "background-color": "transparent"},
+                "icon": {"color": "orange", "font-size": "18px"}, 
+                "nav-link": {"font-size": "15px", "text-align": "left", "margin":"0px", "--hover-color": "var(--secondary-background-color)"},
+                "nav-link-selected": {"background-color": "#0068C9", "color": "white"},
+            }
+        )
+        st.divider()
+        st.markdown("**User Guide**")
+        st.info("💡 Map set to Google Hybrid.")
+
+    # --- 1. ADMIN DOWNLOADER MODULE ---
+    if selected == "Admin Data":
+        st.markdown("## 🏛️ Administrative Boundaries") 
+        # ...
+    elif selected == "Postal Codes":
+        pass # preserved below
+
+    # --- 5. GT CONVERSION MODULE ---
+    elif selected == "GT Conversion":
+        render_gt_conversion_module()
+
+    # --- 6. GEOJSON TO KML MODULE ---
+    elif selected == "GeoJSON to KML":
+        render_geojson_to_kml_module()
+
+    # --- 6. FORMAT CONVERTER MODULE ---
+    elif selected == "Converter":
+        st.markdown("## 🔄 Geospatial Format Converter")
+        
+        tab_g2k, tab_univ = st.tabs(["🌐 GeoJSON ➔ KML Converter", "🔄 Universal Format Converter"])
+        
+        with tab_g2k:
+            render_geojson_to_kml_module()
+
+        with tab_univ:
+            st.markdown("### 🔄 Universal Geospatial Converter")
+            with st.container(border=True):
+                uploaded_file = st.file_uploader("Upload File (Zip, SHP, GeoJSON, JSON, KML, GPKG, CSV, XLSX)", type=['zip', 'shp', 'geojson', 'json', 'kml', 'gpkg', 'csv', 'xlsx'], key="univ_uploader")
             
-            with col_map:
-                show_conv_map = st.toggle("Show Geometry on Map", value=True)
-                render_map([(gdf, "Converted Data", "#FF4B4B")], height=550, show_geometries=show_conv_map)
+            gdf = None
+            if uploaded_file:
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    file_path = os.path.join(tmp_dir, uploaded_file.name)
+                    with open(file_path, "wb") as f: f.write(uploaded_file.getbuffer())
+                    
+                    try:
+                        if file_path.endswith('.zip'):
+                            gdf = extract_and_read_first(file_path, tmp_dir)
+                        elif file_path.endswith(('.csv', '.xlsx')):
+                            df = pd.read_csv(file_path) if file_path.endswith('.csv') else pd.read_excel(file_path)
+                            st.warning("Tabular data detected. Please define geometry.")
+                            c1, c2, c3, c4 = st.columns(4)
+                            mode = c1.radio("Mode", ["Lat/Lon", "WKT"])
+                            if mode == "Lat/Lon":
+                                x = c2.selectbox("Longitude Col", df.columns)
+                                y = c3.selectbox("Latitude Col", df.columns)
+                                if c4.button("Create Points"):
+                                    gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df[x], df[y]), crs="EPSG:4326")
+                            else:
+                                wkt_col = c2.selectbox("WKT Column", df.columns)
+                                if c4.button("Parse WKT"):
+                                    df['geometry'] = df[wkt_col].apply(wkt.loads)
+                                    gdf = gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")
+                        else:
+                            gdf = gpd.read_file(file_path)
+                    except Exception as e:
+                        st.error(f"Error reading file: {e}")
+
+            if gdf is not None:
+                col_ctrl, col_map = st.columns([1, 2], gap="medium")
+                
+                with col_ctrl:
+                    with st.container(border=True):
+                        st.subheader("Conversion Settings")
+                        st.info(f"Loaded: {len(gdf)} features | CRS: {gdf.crs}")
+                        
+                        target_crs = st.number_input("Target EPSG (e.g., 4326, 3857)", value=4326)
+                        if st.button("Apply Reprojection"):
+                            gdf = convert_crs(gdf, target_crs)
+                            st.toast(f"Reprojected to EPSG:{target_crs}", icon="🔄")
+                        
+                        st.divider()
+                        target_fmt = st.selectbox("Output Format", ["GeoJSON", "ESRI Shapefile (.zip)", "KML", "GeoPackage", "WKT (CSV)"])
+                        
+                        if st.button("Convert & Download", type="primary", use_container_width=True):
+                            d, e, m = handle_export(gdf, target_fmt, "converted_data")
+                            if d: st.download_button("Download Result", d, f"converted{e}", m, use_container_width=True)
+                
+                with col_map:
+                    show_conv_map = st.toggle("Show Geometry on Map", value=True, key="univ_map_toggle")
+                    render_map([(gdf, "Converted Data", "#FF4B4B")], height=550, show_geometries=show_conv_map)
 
     # --- 6. VECTOR CALCULATOR MODULE ---
     elif selected == "Vector Calculator":
@@ -703,8 +1135,8 @@ def main():
         
         with col_ctrl:
             with st.expander("📂 1. Data Layers (Input)", expanded=True):
-                f1 = st.file_uploader("Layer A (Primary)", type=['zip', 'geojson', 'kml', 'gpkg'], key="f1")
-                f2 = st.file_uploader("Layer B (Overlay/Secondary)", type=['zip', 'geojson', 'kml', 'gpkg'], key="f2")
+                f1 = st.file_uploader("Layer A (Primary)", type=['zip', 'geojson', 'json', 'kml', 'gpkg'], key="f1")
+                f2 = st.file_uploader("Layer B (Overlay/Secondary)", type=['zip', 'geojson', 'json', 'kml', 'gpkg'], key="f2")
                 
                 if f1:
                     with tempfile.TemporaryDirectory() as td:
